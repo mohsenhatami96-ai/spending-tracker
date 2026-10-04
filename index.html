@@ -115,6 +115,15 @@ tbody tr:hover{background:var(--panel-2)}
 .modal-bg{position:fixed;inset:0;background:rgba(10,14,22,.5);z-index:50;display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 12px;padding-top:max(30px,calc(env(safe-area-inset-top) + 12px));padding-bottom:max(30px,calc(env(safe-area-inset-bottom) + 12px))}
 .file-hidden{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
 #updateBar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:210;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:8px 8px 8px 14px;display:flex;gap:8px;align-items:center;max-width:94vw}
+.budget-row.sub{padding-left:18px}
+.budget-subs summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0 6px 18px;min-height:32px}
+.review-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.review-actions select{flex:1}
+.acc-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--border)}
+.acc-row [data-aname]{flex:1;min-width:120px}.acc-row [data-amatch]{flex:2;min-width:160px}
+.acc-chk{display:flex;gap:6px;align-items:center;margin-top:6px}
+.auto-pill{font-size:10px;padding:0 5px;margin-left:4px;border:1px dashed var(--border);border-radius:6px;color:var(--muted);font-weight:500;vertical-align:middle}
+.cat-row.sub{padding-left:22px}
 .backup-note{border:1px solid var(--border);background:var(--panel-2);border-radius:10px;padding:10px 12px;margin:0 0 10px}
 .backup-note.due{border-color:var(--warn)}
 .modal-bg.show{display:flex}
@@ -161,6 +170,7 @@ tbody tr:hover{background:var(--panel-2)}
   nav.tabs button{min-height:44px}
   .legend .row,.hbar,#trend [data-month]{min-height:44px}
   .modal .btn{min-height:44px}
+  .budget-subs summary,.acc-chk{min-height:44px;display:flex;align-items:center;gap:6px}
 }
 @media (max-width:700px){
   main{padding:12px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
@@ -233,36 +243,115 @@ const round2 = x => Math.round(x * 100) / 100;
 const uid = () => 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const DEFAULT_CATS = [
-  ['Groceries','#2f9e6b','expense'],['Dining','#f08c00','expense'],['Transport','#1c7ed6','expense'],
-  ['Shopping','#d6336c','expense'],['Bills & Utilities','#7048e8','expense'],['Subscriptions','#ae3ec9','expense'],
-  ['Entertainment','#f76707','expense'],['Health','#0ca678','expense'],['Travel','#1098ad','expense'],
-  ['Income','#37b24d','income'],['Transfers','#868e96','transfer'],['Other','#a0a7b4','expense']
+// Two-level categories: main categories, each with optional subcategories. Transactions/rules/budgets store the leaf name
+// (a subcategory, or a main category for "general"). Names are unique across both levels.
+const CATEGORY_TREE = [
+  ['Housing', '#5c7cfa', 'expense', ['Mortgage/Rent', 'Housing fee/BRF', 'Home insurance', 'Repairs & furnishing']],
+  ['Utilities', '#7048e8', 'expense', ['Electricity', 'Broadband', 'Mobile', 'Water/heating']],
+  ['Groceries', '#2f9e6b', 'expense', ['Supermarket', 'Ethnic/specialty store', 'Bakery', 'Alcohol/Systembolaget']],
+  ['Dining', '#f08c00', 'expense', ['Restaurant', 'Fast food', 'Café', 'Takeaway/delivery', 'Bar']],
+  ['Transport', '#1c7ed6', 'expense', ['Fuel', 'Parking', 'Public transport', 'Taxi', 'Car service/repair', 'Vehicle tax/insurance', 'Car loan/leasing']],
+  ['Shopping', '#d6336c', 'expense', ['Clothing', 'Electronics', 'Home & garden', 'Online marketplace', 'Kids', 'Hobbies']],
+  ['Health', '#0ca678', 'expense', ['Pharmacy', 'Doctor/care', 'Dental', 'Optician', 'Gym/sports']],
+  ['Pets', '#a9774d', 'expense', ['Vet', 'Pet insurance', 'Pet supplies']],
+  ['Subscriptions', '#ae3ec9', 'expense', ['Streaming', 'Software/apps', 'Memberships/unions']],
+  ['Insurance', '#3b5bdb', 'expense', []],
+  ['Finance', '#495057', 'expense', ['Bank fees', 'Loan/credit', 'Unemployment fund']],
+  ['Entertainment', '#f76707', 'expense', []],
+  ['Travel', '#1098ad', 'expense', ['Flights', 'Hotels', 'Trains']],
+  ['Personal care', '#e64980', 'expense', ['Hair/barber', 'Beauty']],
+  ['Education', '#74b816', 'expense', []],
+  ['Gifts & donations', '#c2255c', 'expense', []],
+  ['Income', '#37b24d', 'income', ['Salary', 'Refunds', 'Other income']],
+  ['Transfers', '#868e96', 'transfer', ['Swish', 'Own accounts', 'Savings', 'Credit card payment']],
+  ['Other', '#a0a7b4', 'expense', []]
 ];
+// Old flat categories (v1 data, old backups, old rules) -> new names
+const LEGACY_CATS = { 'Bills & Utilities': 'Utilities' };
+function shadeColor(hex, i, n) {   // lighter/darker variants of the parent colour for subcategories
+  const c = parseInt(hex.slice(1), 16), r = c >> 16, g = (c >> 8) & 255, b = c & 255, f = n <= 1 ? 0 : (i / (n - 1)) * 0.9 - 0.45;
+  const mix = v => Math.round(f > 0 ? v + (255 - v) * f : v * (1 + f));
+  return '#' + [mix(r), mix(g), mix(b)].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+const DEFAULT_CATS = CATEGORY_TREE.flatMap(([name, color, type, subs]) => [{ name, color, type }].concat(subs.map((s, i) => ({ name: s, color: shadeColor(color, i, subs.length), type, parent: name }))));
 /* Generic build: no local/personal rules. */
 const LOCAL_RULES = {}, LOCAL_CITIES = [], LOCAL_LOC_ABBR = [];
-// Order matters: first matching rule wins (user rules are inserted at the top).
+// Generic keyword rules (lowest automatic tier, below the built-in merchant dictionary). First match wins; user rules go on top.
 const DEFAULT_RULES = [
-  ['Transfers', ['transfer','internal transfer','to savings','from savings','venmo','zelle','swish','payment thank you','credit card payment','card payment received','autopay','överföring','overforing','revolut top-up','atm withdrawal','cash withdrawal','bankomat','/^\\s*\\+?\\d[\\d\\s-]{6,}\\s*$/']],
-  ['Income', ['salary','payroll','direct deposit','lön','wages','dividend','interest paid','interest earned','tax refund','skatteåterbäring','pension','paycheck','reimbursement']],
-  ['Subscriptions', ['netflix','spotify','hulu','disney+','disney plus','hbo','max.com','youtube premium','apple.com/bill','icloud','google storage','google one','amazon prime','prime video','adobe','microsoft 365','office 365','dropbox','chatgpt','openai','patreon','audible','storytel','viaplay','crunchyroll','paramount+','duolingo','notion','github','1password','nordvpn']],
-  ['Dining', ['uber eats','ubereats','doordash','grubhub','deliveroo','foodora','wolt','just eat','restaurant','restaurang','cafe','café','coffee','starbucks','espresso house','mcdonald','mcdonalds','mcdonald\'s','burger','burger king','max burgers','pizza','pizzeria','sushi','chipotle','kfc','taco bell','dunkin','bistro','grill','kitchen','bar','pub','diner','bakery','pret','five guys','panera','tim hortons','kebab','ramen','glassbar','sushibar']],
-  ['Groceries', ['whole foods','trader joe','safeway','kroger','aldi','lidl','tesco','sainsbury','asda','waitrose','ica','coop','willys','hemköp','city gross','carrefour','rewe','edeka','albert heijn','publix','wegmans','costco','sprouts','grocery','groceries','supermarket','instacart','mathem','hemkop','maxi ica','ica maxi','ica nara','ica kvantum','livs','livsmedel','matbutik','tempo']],
-  ['Transport', ['uber','lyft','bolt','taxi','shell','chevron','exxon','exxonmobil','mobil gas','mobil oil','bp','circle k','preem','okq8','st1','ingo','texaco','fuel','gas station','petrol','parking','parkering','easypark','metro','transit','mta','sl','sj','train','tfl','ventra','clipper','toll','car wash','supercharger','voi','lime','aimo park','aimo','fordonsskatt','transportstyrelsen','bilprovning','besikta','trängselskatt','qpark','q-park','apcoa']],
-  ['Travel', ['airline','airlines','air lines','airways','lufthansa','ryanair','easyjet','norwegian air','sas','klm','air france','emirates','qatar airways','turkish airlines','airbnb','hotel','hotels','booking.com','expedia','hostel','marriott','hilton','hyatt','hertz','avis','sixt','trip.com','vrbo']],
-  ['Bills & Utilities', ['rent','hyra','mortgage','landlord','electric','electricity','water','utility','utilities','pg&e','con edison','vattenfall','e.on','fortum','ellevio','comcast','xfinity','verizon','at&t','t-mobile','telia','tele2','telenor','comviq','internet','broadband','bredband','insurance','försäkring','folksam','geico','state farm','council tax','hoa','phone bill','brf','bostadsrättsförening','sbab','unionen','akassa','a-kassa','ownit','bahnhof','bredband2','hedvig','lassie','agria','trygg-hansa','länsförsäkringar','energi','elnät','avgift kort','kortavgift','csn']],
-  ['Health', ['pharmacy','apotek','apoteket','cvs','walgreens','rite aid','doctor','dental','dentist','tandläkare','clinic','hospital','vårdcentral','optician','gym','fitness','sats','planet fitness','physio','therapy','synoptik','specsavers','firstvet','apotea','kry','min doktor','1177']],
-  ['Entertainment', ['cinema','movie','movies','amc','regal','sf bio','filmstaden','theatre','theater','theatres','steam','playstation','xbox','nintendo','ticketmaster','live nation','concert','bowling','museum','twitch','eventbrite','zoo']],
-  ['Shopping', ['amazon','amzn','ebay','etsy','target','walmart','ikea','h&m','zara','uniqlo','best buy','apple store','clas ohlson','elgiganten','mediamarkt','nike','adidas','zalando','shein','temu','aliexpress','home depot','lowes','bauhaus','jula','biltema','åhlens','primark','sephora']]
+  ['Credit card payment', ['kortfaktura', 'kreditkortsfaktura', 'kreditkort', 'credit card payment', 'card payment received', 'inbetalning tack', 'betalning mottagen', 'payment thank you', 'seb kort', 'sebkort', 'eurocard', 'amex', 'american express', 'bank norwegian', 'norwegian bank', 'resurs bank', 'resurs', 'ica banken kort', 'ica banken', 'ikano bank', 'entercard', 're:member', 'remember kort', 'coop mastercard', 'mastercard faktura', 'klarna bank', 'klarna', 'collector bank', 'collector', 'qliro', 'walley', 'svea bank', 'svea ekonomi', 'avarda', 'santander kort', 'nordea kort', 'swedbank kort', 'handelsbanken kort']],
+  ['Swish', ['swish', '/^\\s*\\+?46\\s?7\\d[\\d\\s-]{6,}\\s*$/', '/^\\s*07\\d[\\d\\s-]{6,}\\s*$/']],
+  ['Savings', ['to savings', 'from savings', 'sparkonto', 'sparande', 'avanza', 'nordnet', 'isk', 'fondköp', 'fondkop']],
+  ['Own accounts', ['internal transfer', 'egen överföring', 'eget konto', 'överföring', 'overforing', 'omföring']],
+  ['Transfers', ['transfer', 'venmo', 'zelle', 'autopay', 'revolut top-up', 'atm withdrawal', 'cash withdrawal', 'bankomat', 'uttag', '/^\\s*\\+?\\d[\\d\\s-]{6,}\\s*$/']],
+  ['Salary', ['salary', 'payroll', 'lön', 'lon', 'löneutbetalning', 'wages', 'paycheck', 'direct deposit']],
+  ['Refunds', ['refund', 'återbetalning', 'aterbetalning', 'retur', 'reimbursement', 'tax refund', 'skatteåterbäring', 'skatteaterbaring']],
+  ['Other income', ['dividend', 'utdelning', 'interest paid', 'interest earned', 'ränta', 'pension', 'försäkringskassan', 'barnbidrag', 'csn utbetalning']],
+  ['Unemployment fund', ['a-kassa', 'akassa', 'a kassa', 'arbetslöshetskassa', 'arbetsloshetskassa']],
+  ['Memberships/unions', ['unionen', 'fackförbund', 'fackavgift', 'medlemsavgift', 'akavia', 'sveriges ingenjörer', 'ledarna', 'transport facket', 'if metall', 'seko', 'naturskyddsföreningen']],
+  ['Streaming', ['netflix', 'spotify', 'hulu', 'disney+', 'disney plus', 'hbo', 'max.com', 'youtube premium', 'amazon prime', 'prime video', 'audible', 'storytel', 'bookbeat', 'nextory', 'viaplay', 'tv4 play', 'tv4', 'cmore', 'c more', 'crunchyroll', 'paramount+', 'skyshowtime', 'apple tv', 'deezer', 'tidal', 'allente', 'boxer', 'discovery+']],
+  ['Software/apps', ['apple.com/bill', 'apple com bi', 'icloud', 'google storage', 'google one', 'google play', 'adobe', 'microsoft 365', 'office 365', 'microsoft', 'dropbox', 'chatgpt', 'openai', 'patreon', 'duolingo', 'notion', 'github', '1password', 'nordvpn', 'app store', 'steam']],
+  ['Mortgage/Rent', ['rent', 'hyra', 'hyresavi', 'mortgage', 'bolån', 'bolan', 'landlord', 'sbab', 'stadshypotek', 'hyresvärd']],
+  ['Housing fee/BRF', ['brf', 'bostadsrättsförening', 'bostadsrattsforening', 'månadsavgift', 'manadsavgift', 'hoa']],
+  ['Home insurance', ['hemförsäkring', 'hemforsakring', 'villaförsäkring', 'home insurance']],
+  ['Repairs & furnishing', ['bauhaus', 'byggmax', 'hornbach', 'k-rauta', 'beijer', 'ikea', 'mio', 'jysk', 'rusta', 'hemtex', 'clas ohlson', 'jula', 'biltema', 'bygg', 'järnhandel', 'jarnhandel', 'färg', 'flyttfirma', 'städ', 'stadfirma', 'rörmokare', 'elektriker', 'snickare', 'home depot', 'lowes']],
+  ['Electricity', ['electric', 'electricity', 'vattenfall', 'e.on', 'eon', 'fortum', 'ellevio', 'tibber', 'greenely', 'godel', 'bixia', 'elnät', 'elnat', 'elhandel', 'energi', 'kraft', 'el']],
+  ['Broadband', ['internet', 'broadband', 'bredband', 'ownit', 'bahnhof', 'bredband2', 'com hem', 'comhem', 'stofa', 'telenor bredband', 'fiber', 'stadsnät', 'comcast', 'xfinity']],
+  ['Mobile', ['telia', 'tele2', 'telenor', 'comviq', 'tre', 'hallon', 'vimla', 'fello', 'chilimobil', 'halebop', 'lyca', 'lycamobile', 'verizon', 'at&t', 't-mobile', 'phone bill', 'mobil abonnemang']],
+  ['Water/heating', ['water', 'vatten', 'va-avgift', 'fjärrvärme', 'fjarrvarme', 'sophämtning', 'renhållning', 'utility', 'utilities']],
+  ['Vehicle tax/insurance', ['fordonsskatt', 'transportstyrelsen', 'trängselskatt', 'trangselskatt', 'bilförsäkring', 'bilforsakring', 'trafikförsäkring', 'infrastrukturavgift']],
+  ['Car loan/leasing', ['billån', 'billan', 'billeasing', 'leasing', 'privatleasing', 'volvo car financial', 'volkswagen finans', 'vw finans', 'toyota financial', 'santander consumer', 'ald automotive', 'ayvens']],
+  ['Home insurance', ['hedvig']],
+  ['Pet insurance', ['lassie', 'agria', 'djurförsäkring', 'sveland djur', 'petson']],
+  ['Insurance', ['insurance', 'försäkring', 'forsakring', 'folksam', 'if skadeförsäkring', 'trygg-hansa', 'länsförsäkringar', 'lansforsakringar', 'gjensidige', 'moderna försäkringar', 'dina försäkringar', 'svedea', 'sveland', 'skandia', 'geico', 'state farm']],
+  ['Loan/credit', ['lendo', 'avbetalning', 'privatlån', 'privatlan', 'blancolån', 'lånebetalning', 'amortering', 'lån', 'csn', 'kronofogden']],
+  ['Bank fees', ['avgift kort', 'kortavgift', 'årsavgift', 'arsavgift', 'bankavgift', 'avgift', 'paketavgift', 'monthly fee', 'service fee', 'overdraft']],
+  ['Takeaway/delivery', ['uber eats', 'ubereats', 'doordash', 'grubhub', 'deliveroo', 'foodora', 'wolt', 'just eat', 'hemkörning']],
+  ['Fast food', ['mcdonald', 'mcdonalds', 'mcdonald\'s', 'max burgers', 'max', 'burger king', 'kfc', 'subway', 'sibylla', 'taco bell', 'five guys', 'chipotle', 'pizza hut', 'dominos', 'domino\'s', 'o\'learys', 'bastard burgers', 'burger', 'kebab', 'falafel', 'gatukök', 'grill', 'korvkiosk', 'hamburgare', 'tim hortons', 'dunkin']],
+  ['Café', ['cafe', 'café', 'kafé', 'kafe', 'coffee', 'kaffe', 'starbucks', 'espresso house', 'wayne\'s coffee', 'waynes coffee', 'joe & the juice', 'pressbyrån fika', 'konditori', 'fika']],
+  ['Bar', ['bar', 'pub', 'krog', 'nattklubb', 'cocktail', 'ölhall', 'bryggeri', 'vinbar', 'sportbar']],
+  ['Restaurant', ['restaurant', 'restaurang', 'bistro', 'trattoria', 'osteria', 'brasserie', 'pizzeria', 'pizza', 'sushi', 'thai', 'ramen', 'indisk', 'indian', 'kinesisk', 'libanesisk', 'steakhouse', 'kitchen', 'diner', 'taverna', 'tapas', 'dumpling', 'noodle', 'wok', 'poke', 'glassbar', 'sushibar', 'lunch']],
+  ['Bakery', ['bageri', 'bakery', 'bakverk', 'pâtisserie', 'patisserie', 'pret']],
+  ['Alcohol/Systembolaget', ['systembolaget', 'systemet', 'vinoteket']],
+  ['Supermarket', ['whole foods', 'trader joe', 'safeway', 'kroger', 'aldi', 'lidl', 'tesco', 'sainsbury', 'asda', 'waitrose', 'ica', 'coop', 'willys', 'hemköp', 'hemkop', 'city gross', 'carrefour', 'rewe', 'edeka', 'albert heijn', 'publix', 'wegmans', 'costco', 'sprouts', 'grocery', 'groceries', 'supermarket', 'instacart', 'mathem', 'maxi ica', 'ica maxi', 'ica nara', 'ica kvantum', 'tempo', 'netto', 'matsmart', 'mat.se', 'stora coop', 'handlar\'n', 'handlarn', 'snabbgross']],
+  ['Ethnic/specialty store', ['livs', 'livsmedel', 'matbutik', 'mat', 'frukt', 'grönt', 'gront', 'fisk', 'chark', 'slakteri', 'ostbutik', 'delikatess', 'asian market', 'orientlivs', 'halal', 'tobak', 'kiosk', 'pressbyrån', 'pressbyran', '7-eleven', '7 eleven']],
+  ['Fuel', ['shell', 'chevron', 'exxon', 'exxonmobil', 'mobil gas', 'mobil oil', 'bp', 'circle k', 'preem', 'okq8', 'st1', 'ingo', 'texaco', 'fuel', 'gas station', 'petrol', 'tanka', 'bensin', 'drivmedel', 'supercharger', 'laddning', 'laddstation', 'ionity', 'recharge']],
+  ['Parking', ['parking', 'parkering', 'easypark', 'aimo park', 'aimo', 'qpark', 'q-park', 'apcoa', 'parkster', 'mobill', 'stockholm parkering', 'p-avgift', 'felparkering', 'kontrollavgift']],
+  ['Taxi', ['uber', 'lyft', 'bolt', 'taxi', 'cabonline', 'taxi kurir', 'taxi stockholm', 'sverigetaxi', 'zimpler taxi']],
+  ['Public transport', ['sl', 'sl access', 'storstockholms lokaltrafik', 'västtrafik', 'vasttrafik', 'skånetrafiken', 'skanetrafiken', 'upplands lokaltrafik', 'ul', 'östgötatrafiken', 'metro', 'transit', 'mta', 'tfl', 'ventra', 'clipper', 'buss', 'bus', 'tunnelbana', 'pendeltåg', 'spårvagn', 'färja', 'waxholmsbolaget', 'voi', 'lime', 'tier']],
+  ['Trains', ['sj', 'vy', 'mtr express', 'snälltåget', 'snalltaget', 'öresundståg', 'train', 'tåg', 'flixtrain', 'flixbus', 'trainline']],
+  ['Car service/repair', ['bilverkstad', 'verkstad', 'bilservice', 'däck', 'dack', 'däckhotell', 'bilvård', 'bilvard', 'biltvätt', 'biltvatt', 'car wash', 'bilprovning', 'besikta', 'opus bilprovning', 'mekonomen', 'meca', 'autoexperten', 'vianor', 'euromaster', 'bilia', 'toll', 'vägtull']],
+  ['Flights', ['airline', 'airlines', 'air lines', 'airways', 'lufthansa', 'ryanair', 'easyjet', 'norwegian air', 'norwegian', 'sas', 'klm', 'air france', 'emirates', 'qatar airways', 'turkish airlines', 'finnair', 'wizz air', 'braathens', 'bra flyg', 'flyg', 'flygbiljett', 'arlanda express']],
+  ['Hotels', ['airbnb', 'hotel', 'hotels', 'hotell', 'booking.com', 'hostel', 'vandrarhem', 'marriott', 'hilton', 'hyatt', 'scandic', 'nordic choice', 'strawberry', 'clarion', 'radisson', 'best western', 'elite hotels', 'first hotel', 'motel', 'stugby', 'camping']],
+  ['Travel', ['expedia', 'trip.com', 'vrbo', 'ving', 'tui', 'apollo', 'sunweb', 'resebyrå', 'ticket resebyrå', 'hertz', 'avis', 'sixt', 'europcar', 'resa', 'travel']],
+  ['Pharmacy', ['pharmacy', 'apotek', 'apoteket', 'apotek hjärtat', 'kronans apotek', 'lloyds apotek', 'apotea', 'meds', 'cvs', 'walgreens', 'rite aid']],
+  ['Dental', ['dental', 'dentist', 'tandläkare', 'tandlakare', 'tandvård', 'tandvard', 'folktandvården', 'folktandvarden', 'tandhygienist']],
+  ['Optician', ['optician', 'optiker', 'optik', 'synoptik', 'specsavers', 'smarteyes', 'lensway', 'linsbutiken']],
+  ['Doctor/care', ['doctor', 'läkare', 'lakare', 'clinic', 'klinik', 'hospital', 'sjukhus', 'vårdcentral', 'vardcentral', 'vårdcentralen', 'region stockholm', 'patientavgift', 'kry', 'min doktor', 'doktor.se', '1177', 'capio', 'aleris', 'physio', 'fysioterapi', 'naprapat', 'kiropraktor', 'psykolog', 'therapy', 'terapi', 'massage']],
+  ['Gym/sports', ['gym', 'fitness', 'sats', 'friskis', 'friskis&svettis', 'nordic wellness', 'actic', 'fitness24seven', 'fitness 24 seven', 'sporthall', 'simhall', 'badhus', 'padel', 'träning', 'traning', 'idrott', 'golf', 'klättring', 'yoga', 'crossfit', 'planet fitness']],
+  ['Vet', ['veterinär', 'veterinar', 'djurklinik', 'djursjukhus', 'evidensia', 'anicura', 'firstvet', 'vet']],
+  ['Pet supplies', ['zoo', 'djuraffär', 'djurbutik', 'arken zoo', 'musti', 'buddy', 'zooplus', 'bozita']],
+  ['Hair/barber', ['frisör', 'frisor', 'frisörsalong', 'frisorsalong', 'barberare', 'barber', 'hårsalong', 'harsalong', 'klipp', 'salong', 'hair']],
+  ['Beauty', ['skönhet', 'skonhet', 'nagelstudio', 'naglar', 'nails', 'spa', 'kosmetik', 'kicks', 'lyko', 'sephora', 'face stockholm', 'the body shop', 'rituals', 'hudvård', 'fransar', 'brows']],
+  ['Education', ['skola', 'school', 'universitet', 'university', 'kurs', 'course', 'utbildning', 'studiefrämjandet', 'medborgarskolan', 'folkuniversitetet', 'körkort', 'trafikskola', 'udemy', 'coursera', 'bokus studentlitteratur', 'kursavgift']],
+  ['Gifts & donations', ['gåva', 'gava', 'donation', 'insamling', 'röda korset', 'roda korset', 'unicef', 'läkare utan gränser', 'rädda barnen', 'radda barnen', 'cancerfonden', 'plan international', 'sos barnbyar', 'stadsmissionen', 'blommor', 'florist', 'interflora', 'present', 'gift']],
+  ['Entertainment', ['cinema', 'movie', 'movies', 'amc', 'regal', 'sf bio', 'filmstaden', 'bio', 'theatre', 'theater', 'teater', 'playstation', 'xbox', 'nintendo', 'ticketmaster', 'live nation', 'tickster', 'concert', 'konsert', 'bowling', 'museum', 'twitch', 'eventbrite', 'escape room', 'liseberg', 'gröna lund', 'grona lund', 'skansen', 'kolmården', 'nöjespark', 'svenska spel', 'atg', 'unibet', 'bingo', 'casino']],
+  ['Kids', ['babyland', 'jollyroom', 'lekia', 'br leksaker', 'toys', 'leksaker', 'polarn o. pyret', 'polarn o pyret', 'name it', 'barnkläder', 'förskola', 'fritids']],
+  ['Electronics', ['elgiganten', 'mediamarkt', 'netonnet', 'power', 'webhallen', 'inet', 'komplett', 'kjell', 'kjell & company', 'dustin', 'proshop', 'apple store', 'best buy', 'teknikmagasinet', 'electronics']],
+  ['Clothing', ['h&m', 'zara', 'uniqlo', 'kappahl', 'lindex', 'dressmann', 'gina tricot', 'cubus', 'mq', 'weekday', 'monki', '& other stories', 'cos', 'jack & jones', 'vero moda', 'only', 'nike', 'adidas', 'zalando', 'boozt', 'nelly', 'shein', 'primark', 'stadium', 'intersport', 'xxl', 'naturkompaniet', 'scorett', 'skopunkten', 'din sko', 'nilson', 'kläder', 'klader', 'sko', 'skor']],
+  ['Online marketplace', ['amazon', 'amzn', 'ebay', 'etsy', 'temu', 'aliexpress', 'wish', 'cdon', 'tradera', 'blocket', 'vinted', 'sellpy', 'fyndiq', 'prisjakt', 'wish.com']],
+  ['Hobbies', ['adlibris', 'bokus', 'akademibokhandeln', 'pocket shop', 'bokhandel', 'bok', 'panduro', 'sportfiske', 'fiske', 'hobby', 'game', 'ateljé', 'musikaffär', 'fotografiska', 'scandinavian photo', 'cyklar', 'cykel']],
+  ['Home & garden', ['plantagen', 'blomsterlandet', 'granngården', 'granngarden', 'trädgård', 'tradgard', 'åhlens', 'ahlens', 'cervera', 'lagerhaus', 'designtorget', 'ikea', 'jysk', 'mio', 'rusta', 'hemtex', 'kitchentime', 'royal design', 'clas ohlson', 'jula', 'biltema', 'normal', 'dollarstore', 'lager 157', 'ö&b', 'överskottsbolaget', 'inredning']],
+  ['Shopping', ['target', 'walmart', 'department store', 'varuhus', 'nk', 'gallerian']]
 ];
 const CURRENCIES = [['USD','US Dollar'],['EUR','Euro'],['SEK','Swedish Krona'],['GBP','British Pound'],['NOK','Norwegian Krone'],['DKK','Danish Krone'],['CHF','Swiss Franc'],['CAD','Canadian Dollar'],['AUD','Australian Dollar'],['JPY','Japanese Yen'],['INR','Indian Rupee'],['AED','UAE Dirham'],['TRY','Turkish Lira'],['IRR','Iranian Rial']];
 const PALETTE = ['#4f6bed','#e64980','#12b886','#fab005','#7950f2','#fd7e14','#15aabf','#82c91e','#be4bdb','#fa5252','#228be6','#40c057'];
 
 function defaultState() {
   const rules = [];
-  DEFAULT_RULES.map(([cat, kws]) => [cat, kws.concat(LOCAL_RULES[cat] || [])]).forEach(([cat, kws]) => kws.forEach(k => rules.push({ id: uid(), pattern: k, category: cat, user: false })));
-  return { version: 1, txns: [], categories: DEFAULT_CATS.map(([name, color, type]) => ({ name, color, type })), rules, budgets: {},
-    settings: { currency: 'USD', symbol: '', symbolPos: 'before', theme: 'auto', periodMode: 'salary', payday: 25, salaryPattern: '' } };
+  Object.entries(LOCAL_RULES).forEach(([cat, kws]) => kws.forEach(k => rules.push({ id: uid(), pattern: k, category: cat, user: false })));
+  DEFAULT_RULES.forEach(([cat, kws]) => kws.forEach(k => rules.push({ id: uid(), pattern: k, category: cat, user: false })));
+  return { version: 2, txns: [], categories: DEFAULT_CATS.map(c => Object.assign({}, c)), rules, budgets: {}, accounts: [], layouts: {},
+    settings: { currency: 'USD', symbol: '', symbolPos: 'before', theme: 'auto', periodMode: 'salary', payday: 25, salaryPattern: '', catVersion: 2, countUnlinkedPayoffs: true } };
 }
 let S;
 function load() {
@@ -276,15 +365,35 @@ function normalizeState(d) {
     version: 1,
     txns: Array.isArray(d.txns) ? d.txns.filter(t => t && /^\d{4}-\d{2}-\d{2}/.test(t.date) && isFinite(t.amount)).map(t => ({
       id: t.id || uid(), date: String(t.date).slice(0, 10), desc: String(t.desc || ''), amount: round2(+t.amount),
-      category: t.category || 'Other', catManual: !!t.catManual, salary: t.salary === true ? true : t.salary === false ? false : undefined, note: t.note || '', source: t.source || '', key: t.key || '' })) : [],
-    categories: Array.isArray(d.categories) && d.categories.length ? d.categories.map(c => ({ name: String(c.name), color: c.color || '#888888', type: c.type || 'expense' })) : def.categories,
+      category: t.category || 'Other', catManual: !!t.catManual, catSource: t.catSource || '', dictName: t.dictName || '', account: t.account || '', payCard: t.payCard || '', salary: t.salary === true ? true : t.salary === false ? false : undefined, note: t.note || '', source: t.source || '', key: t.key || '' })) : [],
+    categories: Array.isArray(d.categories) && d.categories.length ? d.categories.map(c => Object.assign({ name: String(c.name), color: c.color || '#888888', type: c.type || 'expense' }, c.parent ? { parent: String(c.parent) } : {})) : def.categories,
     rules: Array.isArray(d.rules) ? d.rules.filter(r => r && r.pattern).map(r => ({ id: r.id || uid(), pattern: String(r.pattern), category: r.category, user: !!r.user })) : def.rules,
     budgets: d.budgets && typeof d.budgets === 'object' ? d.budgets : {},
+    accounts: Array.isArray(d.accounts) ? d.accounts.filter(a => a && a.id).map(a => ({ id: String(a.id), name: String(a.name || 'Account'), type: a.type === 'card' ? 'card' : 'bank', match: String(a.match || ''), countPayoffs: a.countPayoffs !== false })) : [],
+    layouts: d.layouts && typeof d.layouts === 'object' ? d.layouts : {},
     settings: Object.assign({}, def.settings, d.settings || {})
   };
+  if (!(d.settings && d.settings.catVersion >= 2)) migrateCategories(st, def, Array.isArray(d.rules));
   if (!st.categories.find(c => c.name === 'Other')) st.categories.push({ name: 'Other', color: '#a0a7b4', type: 'expense' });
+  st.categories.forEach(c => { const p = c.parent && st.categories.find(x => x.name === c.parent && !x.parent); if (c.parent && !p) delete c.parent; else if (p) c.type = p.type; });
+  const accIds = new Set(st.accounts.map(a => a.id)); st.txns.forEach(t => { if (t.account && !accIds.has(t.account)) t.account = ''; });
   st.txns.forEach(t => { if (!st.categories.find(c => c.name === t.category)) t.category = 'Other'; if (!t.key) t.key = dedupeKey(t); });
   return st;
+}
+// v1 (flat categories) -> v2 (main > sub). Keeps manual choices (mapped to the new main), user rules (mapped),
+// custom categories (as mains) and budgets; built-in rules are replaced; non-manual rows are re-categorized on load.
+function migrateCategories(st, def, hadRules) {
+  const oldDefaults = new Set(['Groceries', 'Dining', 'Transport', 'Shopping', 'Bills & Utilities', 'Subscriptions', 'Entertainment', 'Health', 'Travel', 'Income', 'Transfers', 'Other']);
+  const map = n => LEGACY_CATS[n] || n;
+  const custom = st.categories.filter(c => !oldDefaults.has(c.name) && !def.categories.some(d => d.name === c.name));
+  const oldColors = {}; st.categories.forEach(c => oldColors[c.name] = c.color);
+  st.categories = def.categories.map(c => Object.assign({}, c));
+  const otherAt = st.categories.findIndex(c => c.name === 'Other');
+  st.categories.splice(otherAt, 0, ...custom.map(c => ({ name: c.name, color: c.color, type: c.type })));
+  st.txns.forEach(t => { t.category = map(t.category); });
+  st.rules = hadRules ? st.rules.filter(r => r.user).map(r => Object.assign(r, { category: map(r.category) })).concat(def.rules.filter(r => !r.user)) : def.rules;
+  const b = {}; Object.entries(st.budgets).forEach(([k, v]) => { const n = map(k); b[n] = (b[n] || 0) + (+v || 0); }); st.budgets = b;
+  st.settings.catVersion = 2; st.settings.needsRecat = true;
 }
 function save() {
   _dataVersion++;
@@ -499,15 +608,15 @@ const isRegexPattern = p => { p = String(p || '').trim(); return p.length > 2 &&
 function compileRules() {
   _compiled = S.rules.map(r => {
     const kw = isRegexPattern(r.pattern) ? '' : tokensOf(r.pattern).join('');
-    return { re: compilePattern(r.pattern), category: r.category, regex: isRegexPattern(r.pattern), kw: kw.length >= 4 ? kw : '' };
+    return { re: compilePattern(r.pattern), category: r.category, user: !!r.user, regex: isRegexPattern(r.pattern), kw: kw.length >= 4 ? kw : '' };
   });
 }
 function invalidateRules() { _compiled = null; }
 // Exact pass: keyword rules match whole words on accent-folded text (so "hemköp" also matches "HEMKOP").
-function matchRule(desc) {
+function matchRule(desc, userOnly) {
   if (!_compiled) compileRules();
   const raw = ' ' + String(desc || '').toLowerCase() + ' ', folded = ' ' + foldText(desc) + ' ';
-  for (const r of _compiled) if (r.re && catByName(r.category) && (r.re.test(folded) || (r.regex && r.re.test(raw)))) return r.category;
+  for (const r of _compiled) if ((userOnly === undefined || r.user === userOnly) && r.re && catByName(r.category) && (r.re.test(folded) || (r.regex && r.re.test(raw)))) return r.category;
   return null;
 }
 // Close pass: tolerant of truncated ("CAFE NAPOLI PIZZE" ~ pizzeria, "APPLE COM BI" ~ apple.com/bill)
@@ -576,16 +685,68 @@ function cleanDescription(raw) {
 }
 const titleCase = s => String(s).toLowerCase().replace(/(^|[\s\-\/(&])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
 function displayName(desc) { const c = cleanDescription(desc); return /[a-zåäö]/.test(c) && c !== c.toUpperCase() ? c : titleCase(c); }
+/* @dict-begin: built-in offline merchant dictionary, generated by tools/build-dict.py. Sources: OpenStreetMap name-suggestion-index (ODbL brand data), Wikidata (CC0), hand-compiled list of Swedish chains. */
+const DICT_INFO = {"entries": 5683, "sources": {"curated": 2225, "nsi": 1228, "wikidata": 2230}, "built": "2026-10-04"};
+const DICT_CATS = ["Alcohol/Systembolaget", "Bakery", "Bank fees", "Bar", "Beauty", "Broadband", "Café", "Car loan/leasing", "Car service/repair", "Clothing", "Credit card payment", "Dental", "Doctor/care", "Education", "Electricity", "Electronics", "Entertainment", "Ethnic/specialty store", "Fast food", "Finance", "Flights", "Fuel", "Gifts & donations", "Gym/sports", "Hair/barber", "Hobbies", "Home & garden", "Home insurance", "Hotels", "Housing fee/BRF", "Insurance", "Kids", "Loan/credit", "Memberships/unions", "Mobile", "Mortgage/Rent", "Online marketplace", "Optician", "Own accounts", "Parking", "Personal care", "Pet insurance", "Pet supplies", "Pharmacy", "Public transport", "Repairs & furnishing", "Restaurant", "Savings", "Shopping", "Software/apps", "Streaming", "Supermarket", "Swish", "Takeaway/delivery", "Taxi", "Trains", "Transport", "Travel", "Unemployment fund", "Vehicle tax/insurance", "Vet", "Water/heating"];
+const DICT_DATA = ["0systembolaget|6et|0vinoteket|0winefinder", "0bageri leksand|2ka stenugnsbageri|1oulangerie ducoin|1rastad bageri|2ioche doree|2öd & salt|5och salt|4ernas|0delifrance|0fabrique|8 bakery|1eiths konditori|1ria bröd|0garströms konditori|2teau|1rinda bageri|1unnars konditori|1öteborgs pepparkaksbageri|0ingmarsö bageri|Fbod|0konsumbagarn|2rsnäs bröd|0landelius konditori|3tmännen unibake|1illebrors bageri|1undbergs konditori|1åttas bageri|0mjälloms tunnbröd|1öja bageri|0nybergs konditori|0ofvandahls|0pallas konditori|1ekara|1olarbröd|1ågen|0ritorno|1oslagsbröd|0sandhamns bageri|1chumachers bageri|1jöholms bageri|1kedvi bröd|3ppsbro bageri|1ocker sucker|0thelins konditori|1össebageriet|0uncle tetsus cheesecake|1tö bakgård|0valhallabageriet|1ete katten|0westerdahl & karsten|1irströms konditori", "0avgift kort|2iavgift|0bankavgift|4girocentralen|1gc|0change|0fakturaavgift|1orex|5 bank|1örseningsavgift|0handelsbanken avgift|0kivra avgift|1ortavgift|0lunar|0moneygram|0n26|1ordea avgift|3thmill avgift|0paketavgift|1åminnelseavgift|0revolut|1ia money transfer|0seb avgift|1wedbank avgift|0transferwise|3velex|0valutaväxling|0western union|1ise|0x change|0årsavgift kort", "0akkurat|1lexandra|0barbarella|1erns|1ishop arms|1obbadilla club|1rewdog|0cafe opera|0debaser|1ocklands|0gasquen|1retas|0half way inn|0liffey|1oopen bar|0mosebacke|0nalen|2ttklubb|0oliver twist|0paddys|1lan b|1ub|0rockbaren|0saltboden landsort|1candic bar|1py bar|1turecompagniet|1ödra teatern|0tech noir|1rädgården|1udor arms|0wirströms", "0aesop|0bangerhead|2th & body works|1eautycos|1lush|1obbi brown|2dy shop|1rows|1yredo|0centralbadet|0day spa|1iptyque|0eleven australia|1stetisk klinik|0faberlic|2ce stockholm|1ransar|0guinot|0hasseludden|1udterapeut|3vård|1årborttagning|0inglot|1sadora|1tstyle|0jo malone|1urlique|0kicks|2ehls|6 since 1851|2ko milano|0laserklinik|1occitane|9 en provence|1yko|0mac cosmetics|2ke up store|2lin goetz|2ssage|1edical spa|1orphe|0nagelsalong|6tudio|2ils|2ture republic|1ordicfeel|1yx|0oriflame|0parfym se|1upa milano|0rituals|7 cosmetics|0sabon|2chajuan|1ephora|1hiseido|1kin clinic|4city|2önhetssalong|1olarium|1pa|1turebadet|0tanning|1haimassage|0vaxning|1ildmarkshotellet|0watsons|0yasuragi|1stad saltsjöbad spa|1ves rocher", "0a3|1damo|1ll in fiber|3ente|0bahnhof|1oxer|1redband|82|8sbolaget|0com hem|3hem|0ip only|0kalix tele24|0nordlo|0open universe|4infra|1wnit|0quadracom|0sappa|1erverado|1tofa|3kab|1venska stadsnät|0t3|1ele2 bredband|4nor bredband|8fiber|3ia bredband|1yfon|0utsikt bredband|0viaeuropa|0zitius", "0arabica|2holma bryggcafe|0barista|2skin robbins|1en & jerrys|2rtilssons stuga|1röd & sa t|1önor & bagels|0cafe|4 amazon|6nchor|7karet|5coffee day|5fix|5lajvet|5nero|6orrhamn|5skogshyddan|6öderberg|3fe nero|6pascucci|2ppuccino|1eders cafe|1hatime|1oco fresh tea & juice|2ffee bean & tea leaf|7lab|7republic|7time|6house by george|6shop company|2ld stone|A creamery|2sta|5 coffee|C costa|6drive through|Fu|0da matteo|1ing tea|1rop coffee|0ekorren|1l&n london|1spresso house|0fabrique stenugnsbageri|1lickorna lundgren|1ärjenäs cafe|0gateau cafe|1loria jeans|1untherska|0happy lemon|1äagen dazs|0il caffe|0joe & the juice|4and the juice|2han & nyström|1uan valdez cafe|2taholms cafe|0kafe 44|5zenit|3fekoppen|1f tea|1onditori|9 valand|1ung fu tea|1ärrhults gård|0lagerlunden|2vazza|1e pain quotidien|1uckin|6 coffee|0machi machi|2halo|2rble slab creamery|1ccafe|0naturligt goda|1uttea|0oldtown white coffee|1nezo|5 tapioca|7ea|1rnö boatyard self service|6åtvarv självservering|5museums garden cafe|Dträdgårdscafe|1scar bergs konditori|0pinkberry|1ressbyrån cafe|Bkaffe|0quickly|0rialto|1oberts coffee|2yaltea|0seattles best coffee|2cond cup|2gafredo|1jöstugan|1tarbucks|9 canada|Auk|1undby gård magasinets cafe|1vartsö bryggcafe|8jetty cafe|1ylvis döttrar|0t4 tea for u|7house|1hermopolium|1iger sugar|2m hortons|1orpet i orhem|0utö gästhamn och cafe|4harbor office & cafe|0waynes coffee|1ienerkonditoriet|H pas dart|2ld bean cafe|0xing fu tang|0yi fang|7 fruit tea|8taiwan fruit tea|9ea|1ogen fruz|3orino", "0ald automotive|1rval|1yvens|0billån|1mw financial services|0care by volvo|3la|3up|0danske finans|0handelsbanken finans|1yundai finans|0ikano bil|0kia finans|0leaseplan|1ynk & co|0mercedes benz financial|9finans|0nordea finans|0ok finans|0polestar finance|1rivatleasing|0renault finans|0santander consumer|I bank|1eb finans|1wedbank finans|0tesla finance|1oyota financial services|7kreditbolag|0volkswagen finans|3vo car financial|J services|5finans|1w finans|0wayke", "0abarth|1cura|1ixam|1lfa romeo|2liance|8 tire company|2pine|1pollo tyres|1ston martin|1utodoc|4experten|0bentley|2sikta|1ildelaronline24|3ia|5 service|3provningen|3tema bilservice|3verkstad|1osch car service|6service|1ra bil|2idgestone|B india|1uild your dreams|1yd auto|0cadillac|2rglass|3spect|1hery|3vrolet|2rysler|1ircle k biltvätt|2troen|1ontinental ag|1upra|0dacia|3kia|2ihatsu|1ekra|1in bil|1odge|1s automobiles|1unlop|1äckia|4team|0ehrle|1uromaster|0ferrari|1iat professional|2rst stop|2sker|2xa bilen|1ord motor company|0garage renault|1eely|2nesis|7 motor|Ds|1reat wall|A motors|1wm ora|0harley davidson|2val|1edin|5 bil|1ino motors|1onda|5 cars|6motorcycle repair|1yeondaegia|2undai|7 india|0imo car wash|1nfiniti|1suzu|0jaguar|0karma|5 automotive|1ia motors|1oenigsegg|1vd|3bil|1ärcher|7 clean park|0lamborghini|2ncia|3d rover|1exus|1incoln|1otus|5 cars|1ucid|5 motors|6studio|0maserati|2zda|1claren|1eca|2konomen|2rcedes|8 benz|1g motor|8s|1idas|2tsubishi|A motors|1obile wash|2trio|1r wash|2jeff|0nio house|2ssan|1ovus glass|0ok biltvätt|1pus bilprovning|0peugeot|1oint s|2lestar|8 racing|2rsche|0renault|2unokoria|1iddermark|1olls royce|B motor cars|1yds bilglas|0shell car wash|1koda|5 auto|2ruvat|1mart|5 repair|1peedy|1sangyong|1tatoil biltvätt|1ubaru|2per dekk|A service|6service dekk|0tesla|5 motors|1hansen|1otal wash|2yota|6 center|7usa|1rodo|1vättsträt|0vauxhall|1ianor|1olkswagen|A commercial vehicles|3vo|5 service|0xpeng", "0& other stories|0585 gold|0a lange & söhne|1bout you|1cne|4 studios|1ddnature|2idas|6 original|Fs|1eropostale|1found|1gatha|2ent provocateur|1imn|1lbrekts guld|2do shoes|2exander mcqueen|2lbirds|2t nbas|1merican vintage|2os style|1place|2m monaco|1ristocrazy|2ket|2mani exchange|1sics|2os|1thletes foot|9world|1ubade|2demars piguet|1w lab|0ba&sh|2lenciaga|5o|3ly|2nana republic|F factory|2rbour|2sshunter production|2ume & mercier|1ench|2rshka|2stseller|2tter bodies|4y barclay|1ijou brigitte|2k bok|2llabong|2mba & lola|6y lola|2rkenstock|1jorn borg|2örn borg|1låkläder|1ody glove|2ggi milano|3ner|2ozt|2sco|3s|2ttega veneta|1randy melville|2eitling|2ooks brothers|3thers|2unello cucinelli|1uccellati|2gatti|7 fashion|2lgari|2rberry|1vlgari|1y malina|0cafe coton|2liroots|3l it spring|4iope|3vin klein|C jeans|3zedonia|2mel active|3per|2nada goose|4li|2rhartt work in progress|3lings|3ters|7 babies and kids|4ier|2timini|1eline|4o|1hampion|3nel|4ge lingerie|3umet|2eap monday|2loe|1laires|7 accessories|8stores|3rks|3s ohlson kläder|3udie pierlot|1ole haan|3ins|3umbia|2nverse|2s|2telac|3ton on|9 kids|1rocs|1ubus|0d and g|1aniel wellington|1ecathlon|2facto|2ichmann|9 schuhe|2sigual|1idriksons|2esel|2n sko|3h van|8 paris|1oc marten|As|3tor marten|Ds|2lce & gabbana|6and gabana|Fna|Dbanna|6y gabana|Dna|Bbana|Ena|5zza|3larstore kläder|2nna karan|B new york|1r martens|2ess barn|5mann|1u pareil au meme|2nhill|0ecco shoes|1dblad|1fva attling|1lena miro|2isabetta franchi|2los|1mporio armani|1rmenegildo zegna|1scada|2prit|1tam lingerie|1urosko|1ytys|0falconeri|2strack|1endi|1ilippa k|1jällräven|1oot locker|B europe|5solutions|4way|2rever 21|2ssil|1rench connection|1usalp|0g star|6 raw|1ant|2p body|4kids|1erry weber|1ina tricot|2ordano|4gio armani|2venchy|1litter|1olden goose|1randpa|1ucci|2drun sjöden|2ess|5 accessories|2ldfynd|0h&m|1ackett|7 london|2glöfs|2lens|3fprice|2nesbrands|2ppy socks|2vaianas|1elly hansen|2nnes & mauritz|2rmes|2stra handsken|1m|1ollister|3zweiler|2udini|3se of dagmar|9hoops|1ugo boss|2mana|6 people to people|2sh puppies|1ööks hästsport|0icaniwill|1ndian accessories brand|7watch co|Fmpany|4ska|2ternational watch co|Mmpany|5sport|3imissimi|B uomo|0j lindeberg|2m weston|1acadi|3k & jones|2eger lecoultre|1c|1il sander|2mmy choo|1ohnells|2tex|1unkyard|2st over the top|0kalyan jewellers|2ppahl|2rl lagerfeld|1enzo|1iabi|2ds brand store|5foot locker|2g l|1ookai|2ton|0la martina|3vie en rose|2coste|2ger 157|1c waikiki|1e coq sportif|2e cooper|2vis|2xington|1index|2u jo|1oding|2ngchamp|4ines|2ro piana|2uis vuitton|2visa|1uisa spagnoli|2lulemon|1öplabbet|0maison margiela|2ngo|2rc cain|5jacobs|5opolo|3ella|3ia nilsdotter|4na rinaldi|3tens|2ssimo dutti|2vi jeans|2x fashion|4mara|3&co|2yoral|1ephisto|2rrell|2ssika|1ichael kors|1omoni|2ncler|3ki|3tblanc|2tivi|2vado|1q|2 marqet|7uet|3retail|1ulberry|2stang|0name it|2papijri|2turkompaniet|2utica|1elly|2w balance|4yorker|3bie|1ike|4 clearance store|5factory store|5well collective|2lson|6 shoes|1k|1ly|1ordiska kompaniet|3th face|6sails|1udie jeans|0odd molly|1ff white|1ld navy|1mega|1neill|2ly|4 & sons|1rchestra|2say|1shkosh|7 bgosh|1ur legacy|2tnorth|1vs kids|1ysho|0pandora|3erai|2rfois|2tek philippe|2ul smith|2yless|7 shoesource|1eak performance|2ndleton|3ti|2pe jeans|1iaget|2eces|3rre cardin|2nko|1olarn o pyret|3o ralph lauren|2m dapi|2rsche design|1rada|2imark|7 penneys|3ncesse tam tam|2omod|1ull & bear|4&bear|2ma|4 outlet|2nt roma|0quicksilver|3ksilver|0r m williams|1alph lauren|1eebok|2gatta great outdoors|2play|2served|3idus|1ieker|2mowa|2u paris|1oberto cavalli|2ckport|2debjer|2ger dubuis|2lex|2ots|0s oliver|1ail racing|3nt laurent|2lamander|3omon|3vatore ferragamo|2ms e sams e|4oe&samsoe|5nite|2n antonio shoe|3dqvist|2s shoes|1corett|3tch & soda|1ebago|2iko|2lected|3lpy|1fera|1hein|1insay|1kechers|8 usa|3tchers|2opunkten|1mycka|1neakersnstuff|2s herning|1ophie by sophie|1portamore|5s authority|7direct|6direct com|Ddot com|2ringfield|1tadium|7 outlet|8sports store|3yhard|2ella mccartney|2radivarius|3onger|1uitsupply|2perdry|1warovski|3tch|2eet sktbs|2ims|0tag heuer|2lly weijl|2pe a l il|2rtine et chocolat|1eam sportia|2d baker|5ernhardtz|2rranova|2zenis|1hom browne|4as sabo|1iffany|7 & company|7s|2ger of|2mberland|2ssot|1om ford|4tailor|3my hilfiger|E kids|2pman|3shop|1res bien|2iwa|1udor|1wilfit|3st & tango|0u s polo|8 assn|1gg ugg australia|1nder armor|Aur|C youth|2iqlo|3ted colors of benetton|1r&penn|2ban outfitters|5ears|0vacheron constantin|2lentino|3mano|2n heusen|3essa bruno|3s|1ero moda|3sace|3tbaudet|1ictorias secret|2la|3ebrequin|1olcom|3t|4 fashion|0wacoal|2lking company|1eekday|4end max mara|2sc|1hyred|1omens secret|6ecret|2od wood|0xxl|0zalando|2ra|1egna|1illi|2zzi|0åhlens", "0american express|3x|1nyfin|1varda|0bank norwegian|1illmate|0circle k mastercard|1ollector|9 bank|2op mastercard|0ellos mastercard|1ntercard|1urocard|0handelsbanken kort|0ica banken|A kort|1kano bank|0klarna|6 bank|1ortfaktura|1reditkortsfaktura|0lendify|0nordea kort|4iska kreditkort|3wegian bank|0okq8 visa|0preem mastercard|0qliro|0re member|2member|2surs|6 bank|0santander kort|2s eurobonus mastercard|1eb kort|3kort|1j prio mastercard|1vea bank|5ekonomi|1wedbank kort|0walley|0zaver", "0citydental|1olosseum smile|0dentix|1istriktstandvården|0folktandvården|0happydental|0odontologen|1ral care|0praktikertjänst tandvård|0smile tandvård|0tandhygienist|4läkare|9na|4vård|8shuset", "0achima care|1leris|1mbea|2plifon|8 deutschland|9france|0blodkollen|0capio|1ityakuten|0doktor se|624|0ersta sjukhus|1ssity|0fysiokliniken|0hälsocentralen|0karolinska|1iropraktiska kliniken|1ry|0livi|0medicheck|5over|1in doktor|3dler|0naprapatlandslaget|1ärakuten|0patientavgift|1raktikertjänst|1sykologpartners|0region halland|7jönköpings län|7skåne|8tockholm|7uppsala|7östergötland|2habcenter|0sahlgrenska|1ophiahemmet|2s alarm|1pecialistläkarna|1t görans sjukhus|1ynlab|0unilabs|0västra götalandsregionen|1årdcentral|Ben|0werlabs", "0abf|1llakando|1ntagning se|0berghs|3litz|1ilda|1rilliant|3tish council|0chalmers|1oursera|1sn avgift|0dansskola|0edx|0folkhögskola|4universitetet|0göteborgs universitet|0handelshögskolan|1yper island|1ögskola|0karolinska institutet|1th|1ulturskolan|2rsavgift|4bok|1örkort|7sportalen|0linkedin learning|1unds universitet|1äxhjälp|0masterclass|2ttecentrum|1edborgarskolan|1usikskola|0nackademin|0sensus|1fi|1imskola|1killshare|2olavgift|4verket|1pråkskola|1tockholms universitet|2ridsberg trafikskola|2udentlitteratur|5ra nu|4iefrämjandet|7örbundet|4ybuddy|0terminsavgift|1rafikskola|6verket prov|0udemy|1hr|1niversitet|1ppsala universitet|0vuxenskolan|0wall street english|0yrgo", "0ale el|0billigel|2xia|1järe kraft|1oo energi|2rås energi|0c4 energi|1heap energy|0dalakraft|0e on|1lhandel|2levio|2nät|2skling|2verket|1nkla elbolaget|1on|1skilstuna energi|H och miljö|0falu energi|1orsmarks kraftgrupp|3tum|1yrstad|0geab|1odel|2tlands energi|1reenely|1ävle energi|1öteborg energi|0halmstads energi|1errljunga elektriska|1jo energi|1ärjeåns|0jämtkraft|1önköping energi|0kalmar energi|2rlshamn energi|5tads energi|1raftringen|1ungälv energi|0leva i lysekil|1idköping energi|2nde energi|1jusdal energi|1okalkraft|1uleå energi|0mjölby kraftnät|1otala energi|1älarenergi|1ölndal energi|0nacka energi|1ibe industrier|1ordic green energy|5sk energi|3renergi|0olofströms kraft|1skarshamn energi|1va energi|0partille energi|0ronneby miljö och teknik|0sala heby energi|2ndviken energi|1kekraft|3llefteå kraft|2ånska energi|2övde energi|1tockholms elbolag|1undsvall energi|1vealandskraft|3nska kraftnät|1ödertälje energi|2lvesborg energi|0tekniska verken|2lge energi|1ibber|1ranås energi|2ollhättan energi|0umeå energi|1noxengi|0vattenfall|1b energi|1immerby energi|1ärnamo energi|2sterbergslagens energi|2xjö energi|0öckerö energi|1resundskraft", "03butiken|0acer|1gence orange|1pple store|1sus|1udio video|0back market|2ng & olufsen|1ose|0cartridge world|1don elektronik|1las ohlson elektronik|1onrad|1yberphoto|0dell|2vialet|1igicel|1ustin|6 home|0eb games|1lectrokit|7nics boutique eb games|2giganten|A se|1uronics|8 centre|1xpert|0fyndiq elektronik|0gamestop|7re|1oodbye|3gle store|0harman kardon|1ifi klubben|4klubben|1p|1uawei|0inet|4 se|0japan photo|1bl|0kjell|5 & company|6och company|1omplett|0la curacao|1eica|2novo|1g|2 electronics|1jud & bild|1ogitech|1yreco|0marshall|1edia markt|5markt|1icrosoft store|2ele|1obilfodral|1pb|0netonnet|8 se|1intendo store|0office depot|1neplus|1range|6 egypt|0philips|2one house|5house|1ower|1rink|2oshop|0radioshack|2zer|1efurbed|0samsung|1candinavian photo|1onos|3y|4 center|9re|1pelbutiken|1taples|1wappie|0t mobile|8 international|9pl|1eknikmagasinet|2le2 butik|4nor butik|3ia butik|1radera elektronik|0webhallen|9 com|0xiaomi", "0abba the museum|1ktiebolaget trav och galopp|1spuddsparken|2trid lindgrens värld|Hworld|1tg|1vesta visentpark|2icii arena|7experience|1xs|0baltic sea science center|1erglunds tivoli|3waldhallen|2t365|3sson|1iljettkiosken|3letto|2ngolotto|2o|3graf|1luebird|1oda borg|2rås djurpark|2wlinghallen|1råvalla|0casino cosmopol|3umo|1hina teatern|1inema|6rk|4polis|2rkus|1omeon|0daftöland|1ramaten|0eisfeldts menageri|1scape room|1ventbrite|5im|2olution|0fame world|2sching|1estival|1ilmstaden|A heron city|Bkista|Bsergel|Cickla|Cöder|Btäby|Bvällingby|1olkets bio|2tografiska|1riends arena|2ösö zoo|1un city|2ruvik|7sparken|1yrishov|0glenn miller cafe|1okart|6bana|2tland animal park|7s djurpark|1röna lund|4åsens älgpark|1ustavsvik|1årdsjö älgpark|1öta lejon|3eborgsoperan|0hajper|2lmstad adventure park|9äventyrsland|2vets hus|1elsingborgs djur och lekpark|1igh chaparral|E theme park|2storiska museet|1usbybadet|0ikea småland|0jump yard|2nibacken|3sele djurpark|8zoo|1ärvzoo|0kabe sommarland|1indred|1okpunkten|2lmården|9 wildlife park|9s djurpark|2mbilotteriet|2nsert|7huset|1reutzbergs menageri|1ulturhuset|2ngliga operan|4sbyn zoo|8s djurpark|0laserdome|1eksand sommarland|2ovegas|1iseberg|8 oceana|2ttle gym|2ve nation|1ollapalooza|2tto|1ycksele djurpark|9zoo|0malmö arena|6opera|2ritime museum and aquarium|2serhallen|1iljonlotteriet|1oderna museet|2ose of annerod|1r green|1useet|4um|1y gym|0nationalmuseum|3urhistoriska riksmuseet|1efertiti|1intendo eshop|1olhaga djurpark|8parkbad|2rdens ark|4icbet|5ska museet|4poolen|3tic|1öjesfältet|5park|0olearys bowling|1peran|1rsa grönklitt|5rovdjurspark|1scarsteatern|0paf|2rken zoo|1laystation store|1ostkodlotteriet|0santaworld|1candinavium|1f bio|1imhallsbadet malmö|1jöfartsmuseet akvariet|1kansen|3ra sommarland|2ånes djurpark|1lottskogens djurpark|6skogens djurpark|1måland|1ommarland|1peedy casino|2ritmuseum|1tadsteatern|3mpen|2eam games|2orsjöbadet|2rawberry arena|1ummerburst|2nne sommarland|1venska bio|8postkodlotteriet|8spel|1weden rock|1ydpoolen|0teater|2kniska museet|2le2 arena|1icketco|6master|4ster|1omteland|2sselilla sommarland|Cummer park|1rampolinpark|2iss|2opikariet|B helsingborg|0ullevi|1nibet|3verseum|0vasamuseet|2ttenpalatset|1ildriket|1äxjö simhall|0way out west|0xbox store|0ystad arena|6djurpark|0äventyrsbadet i kalmar|8landet kinnekulle|0öland zoo and amusement park|5s djur och nöjespark", "07 eleven|8 australia|9canada|9philippines|0asian market|0bens cookies|1odylab|2njour|0caltex|2rrefour express|Amarket|1hokladfabriken|1ircle k canada|0direkten|0ekoboxen|1xxon|5 tiger mart|0fiskhandlarn|0glo studio|1nc live well|1odisfabriken|1ymgrossisten|0hemmakväll|0jacksons|0karamellkungen|1icks hälsa|1usmi tea|1ött & chark|0lawson|1eonidas|1ife|2ndt|1ukoil|6 minimarket|7shop|7trgovina|1äderach|0macs convenience stores|2hallat|2t & tobak|1itt livs|1obil|5 mart|0natur house|1espresso|0ok mart|1n the run|1rientlivs|1stbutiken|0pressbyrån|0quiktrip|0relay|0seven eleven|1hell select|7hop|1ockerbit|1par express|5ni|1tar mart|2op cafe|1un supermarket|0tesco express|1iger mart|1obaksaffären|2tal|5 access|5energies|D access|1ullfri|1wg tea|0vegomagasinet|0whsmith|1orld food", "0auntie annes|C pretzels|0brioche|1urger king|B brasil|Cespana|4uer king|0carls jr|1heckers|8 drive in restaurants|2icken rice shop|3na wok|3potle|2opchop|8 asian express|1innabon|2rcle k food|0dairy queen|3sys|1ominos|7 australia|8pizza|D india|1unkin|6 doughnuts|0es teler 77|2presso stop|1xtreme pizza|0falafelbaren|1igaros pizza|2reaway|8 pizza|2ve guys|1rasses|0gatuköket|1erman doner kebab|1rillen|0hardees|1esburger|0ikea bistro|5restaurant|0jollibee|1tk|1ureskogs|0kebabhouse|1fc|1ing kebab|1orv kiosk|1rispy kreme|C doughnuts|0little caesars|E pizza|8easars|E pizza|1ong john silvers|2tteria|0marrybrown|2x|3 hamburgare|1cdonalds|1ister donut|1r sub|0old chang kee|0panda express|2pa john|9 pizza|9s|A pizza|1epper lunch|1ita pit|2zza hut|9 delivery|Aexpress|6inn|6nova|6ronny|5bakeren|1ollo campero|6tropical|2peyes|2tato corner|1rime burger|0quiznos|7 sub|Bs|0royal kebab|0saravana bhavan|8a bhavan|1barro|6 pizzeria|1hake shack|1ibylla|7 grill|1onic|5 drive in|1ubway|6 australia|7brasil|7mexico|7sandwiches|7uk & ireland|0taco bar|6ell|2sty|1elepizza|0upper crust|0wayback burgers|1endys|1impy|5 restaurants", "0agence ecobank|1varda bank|0banca intesa|6popolare di vicenza|4o di napoli|6santander|F banespa|3gkok bank|3k of baroda|8china intl|8india|8nova scotia|4aktiebolaget nordiska|2rclays|8 bank|D plc|9uk|1jursås sparbank|1np paribas|0caisse depargne|2risbo|2ssa di risparmio del veneto|Ki firenze|1hase|5 bank|6manhattan bank|2ina construction bank|1itibank|8 brazil|9us|1ommonwealth bank|H of australia|1redit mutuel|0dalslands sparbank|2nske bank|1ena bank|3izbank|2utsche bank|0ecobank|1nity bank|1p bank|0föreningsbankernas bank|0garanti|7 bankas|9bva|0handelsbanken|1sbc egypt|0ing bank|2tesa sanpaolo|F s p a|0jp morgan chase bank|2morgan chase|0karlskoga härads sparbank|0laholms sparbank|2ndshypotek bank|1ea bank|2ksands sparbank|1änssparbanken stockholm|1önneberga tuna vena sparbank|0maybank|1edmera|2rcantil|1orrow bank|0navy federal credit union|1edbank|1oba bank|2rdals härads sparbank|4ea|4iska handelsbanken|4västra skånes sparbank|3ion bank|3rbärke sparbank|3thmill bank|0orusts sparbank|0plus1|0roslagens sparbank|0sala sparbank|2ntander|9 mexico|2vings bank russian fed|1berbank|2i atm|1cotia|6bank|1esambanken|1kandiabanken|6naviska enskilda banken|2urups sparbank|2ånes enskilda bank|4ska banken|1målands bank|1napphanebygdens sparbank|1ociete generale|1parbanken alingsås|Bbergslagen|Cikupan|Clekinge|Bgotland|Cöinge|Bnord|Bskåne|Cpira|Cyd|Btranemo|Bvästra mälardalen|Böresund|9rnas bank|1tandard bank|9chartered|I bank|3te bank of india|1undsvalls handelsbank|1veriges föreningsbank|1wedbank|1ydbank|3svenska kreditaktiebolaget|1öderhamns sparbank|5manlands enskilda bank|3ra dalarnas sparbank|2lvesborg mjällby sparbank|2rmlands sparbank|0tjörns sparbank|1omelilla sparbank|1rygg banken|1urkiye garanti bankasi|0ubi banca|1lricehamns sparbank|1plandsbanken|0vadstena sparbank|2rbergs sparbank|1eneto banca|1ijaya bank|2rserums sparbank|0westra wermlands sparbank|0ystads sparbank|0ålems sparbank|1ryds sparbank", "0aegean|1ir france|3baltic|1mapola|7 flyg|2erican airlines|1ndersson business jet|1rlanda|1ustrian|1viator|0bra braathens regional airlines|4flyg|3athens|9 international airways|Aregional|2itish airways|2omma business jet|6flyg|2ussels airlines|0delta|1irektflyg|0easyjet|1dreams|1mirates|1tihad|1urowings|0finnair|1lygbiljett|5olag|4resor|3r|1rost air|0gotogate|1rafair|0höga kusten flyg|0iberia|1celandair|1ta airways|0jonair|1ämtlands flyg|0kayak|1iwi com|1lm|0landvetter|1ot|1ufthansa|0momondo|1ytrip|0nord flyg|3wegian|9 air|2vair|0oceansky cruises|1podo|0pegasus|0qatar airways|0ryanair|0sas|3 cargo|4link|1canbee|4dinavian airlines|5jet|1ingapore airlines|1kydive airlines|3scanner|1unclass|2persaver|1veaflyg|3nsk lufttrafik|1wedair|5via|2iss|0tap|1hai airways|1ravelstart|2ip com|1uifly|6 nordic|2rkish airlines|0united|0vueling|1ästflyg|0west air|6tlantic|1izz air|4air", "0afriquia|1ir liquide|1llego|1pi ip|1s 24|0bee charging solutions|2yfin|1ilisten|1osch ebike systems|1p|2 america|3connect|3gas station|0campsa|2seys|6 general store|1hargefinder|6point|2evron|1ircle k|2tgo|1lever|1oles|5 express|2stco gas|Aoline|7wholesale|0din x|0e leclerc|2on danmark|6rive|1asee|1emobility|1mobility|1on drive|1sso|4 canada|5express|5service station|1urooil|0fastned|1ortum charge & drive|0gr nn kontakt|1ulf|0hcf|1ydro|0incharge|2go|2termarche contact|Csuper|1onity|0jet|0leclerc|0marathon|8 gas|1er germany|4laddning|2sser|2tro|1obile|2nta|0neste|5 oil|1io power|9 charger|Adestination|Aswap|0okq8|1xxo gas|0petrol ofisi|6imex|5nas|1osto shell|1reem|1tt station|1uma energy|0qstar|1uiktrip corporation|0racetrac|1echarge|8 charge & drive|2psol|1obert bosch|1ubis|0safeway|7 fuel station|1hell|5 australia|6express|6gas station|6oil|6petrol station|6service station|7tation|1t1|2ation esso|8service|F e leclerc|9hell|8total|4oil|0tank & go|4a|4pool24|1esla destination charger|6supercharger|6wall connector|2xaco|6 service station|7with techron|1otalenergies charging services|6rg|0ultramar|1no x|0valero|2ttenfall incharge|0walmart", "0act svenska kyrkan|1mnesty|0barncancerfonden|1lommor|4sterbud|0cancerfonden|0diakonia|0erikshjälpen|0florist|0gift card|4card|2va|1reenpeace|1åvobrev|0hjälpkällan|3rt lungfonden|1uman bridge|0insamling|2terflora gåva|1slamic relief|0läkare utan gränser|0majblomman|1usikhjälpen|1yrorna|0naturskyddsföreningen gåva|0plan international|1resent|7kort|0radiohjälpen|1ädda barnen|1öda korset|0smartbox|1os barnbyar|1tadsmissionen|2ockholms stadsmission|1vensk insamlingskontroll|6a röda korset|3rige för unhcr|1wish gåva|0tictail|0unhcr|2icef|1pplevelsepresent|0världsnaturfonden|0wwf", "09round|6 kickboxing fitness|0actic|1nytime fitness|F australia|0badhus|2lance yoga|2rrys|1odystreet|2ulders|3ncefit|0crossfit|1urves|0eriksdalsbadet|1xxentric|0f24s|1itinn|3ness|7 24 seven|724seven|1riskis|7 & svettis|8o svettis|9ch svettis|7&svettis|1ysiken|0golfbox|4klubb|1ym|0holmes place|0ice hockey|1drottsförening|0john reed fitness|0klättercentret|7verket|0matchi|1in golf|0nordic wellness|0padel|5 zenter|5center|5verket|1dl center|1laytomic|1uls & träning|0sats|1candinavian training center|1imhall|1porthallen|1tc|1vettis|0we are padel|1orld gym|0yogayama", "0barber|6are|6ia|6shop|1oka direkt|4direkt|0cutters|0damfrisör|0fashion hair|1risör|6salong|0hairdresser|1errfrisör|1årfrisör|3salong|4tudio|3verket|0klippet|5oteket|0new style|0oldboy|0qb house|0saint algue|2long|2xen|1naggan|0toni & guy", "04sound|0adlibris|8 com|1kademibokhandeln|H se|1lphaspel|1ntikvariat|0bike gallery|4ster|1oesner|2kbörsen|3ia|3us|5 com|2nniers bokklubb|0cewe|1remona|3scent|1ykelkraft|5poolen|0desenio|1ohlwitz bokhandel|2rmy|1ragons lair|0fiskeshopen|1otokungen|0games workshop|2rnhuset|1ear4music|1iant|1leerups bokhandel|1olf|4häftet|4store|0hedengrens|1jalmar möllers bokhandel|1obbex|4yhallen|0ifolor|0jakt & fiske|4ia|1ärbo garn|0kodak|5 express|0lanas|1itteraturmagazinet|1judia|1umens|0majornas böcker & kaffe|1odellhobby|2nark|1usikbörsen|5huset|1ånadens bok|0nordiska bokhandeln|1ya musik|0outdoorexperten|0panduro|7 hobby|1h lindstedts universitets bokhandel|1ocket shop|2sterstore|1rintler|1ysselbolaget|0science fiction bokhandeln|1elfmade|1löjd detaljer|1martphoto|1pecialized|2ortfiskeprylar|5son|1tickat|2off & stil|0thomann|1reck|3k bicycle|1sutaya|1ygverket|0uppsala english bookshop|0warhammer|1ebhallen spel|0xxl cykel|0yellowkorner", "0ahlsell|0bakker|2lsam|1iltema hem|1liss|2omsterlandet|E se|1osch|1yggmax trädgård|0cervera|7 se|1las ohlson hem|1oop hem|1ramers blommor|0designtorget|2walt|1ollarstore|1uka|0electrolux|1m hem|1nza home|1uroflorist|0florister|2ying tiger|C copenhagen|0gardena|1ranit|4ngården|B se|1ustavsberg|0hemköp hem|3my|3tex|1ouse doctor|1usqvarna|0ifö|1ittala|1mpecta|1nterflora|0jula hem|1ärnhandeln|4ia|0kitchen lab|7time|1odin|2sta boda|0lagerhaus|1e creuset|2kmer|0madame coco|2kita|1iniso|2o hem|4se|0nordic nest|3mal|0odlingsboxen|1rrefors|0plantagen|9 se|0royal design|1usta|1örstrand|0s strene grene|1tiga|0tescoma|2xas trading|1iger|1radgard|2ädgårdsbutik|0verktygsboden|1illeroy & boch|0weibulls|1urth|0xxl hem|0zetas|0åhlens hem|0ö&b|1verskottsbolaget", "0bostadsrättsförsäkring|0hedvig|2mförsäkring|0insurello|0villahemförsäkring", "027ans nattlogi|1home hotel apartments|Cgävle|6stockholm south|0a marican hostel & hotel|1&o|1bisko guesthouse & activities|7turiststation|6jaure|B mountain cabin|2rins hotel|1c hotel|8 by marriott stockholm ulriksdal|2co hostel|1dagio|1f chapman|2färshuset utö|1goda|1iden|5 by best western|6hotel|2rbnb|1kademihotellet|2kastugan|2tse|1lbert kök hotell & konferens|2ebo pensionat|2holmens camping & stugby|2ila|2mnas park hotel|2oft|2sens hotell|2ua hotels & resorts|2varet hotel & hostel|1maranten|2ber hotell|2erican hostel & hotel|2marnäs wärdshus|1narisstugan|2daz|2jans fjällstation|2na s bed & kitchen|4s hotell|3o 1793 sekelgården|2stalten västervik centrum|1pelvikstrand|2otekarns b&b|2ple hotel & konferens göteborg|1rboga stadshotell|2chipelago hostel old town|3tic colors northern lights apartments|7gourmet cabin|2ken hotel & art garden spa|3ipelag hotel & brewery|2landa hotell|2vika stadshotell|1sa herrgård|2cend hotel collection|1t six|2tendo park hotell|1ugustas bed & breakfast|2rora bed & breakfast|2tograph collection|1valon hotel|2esta stadshotell|0b&b hotel|9s|4villa orion|4åvägen|1acklund boende i dalarna|4packers göteborg|2dholmen|5tellet|2nyan tree|2shults gård|1ed & breakfast hotels|Gvilla sedin|2llas place|3mond|2ngtssons loge|2rgendal|3ns hotel|2st hotels|5western|C and hotel|M linkoping|Erena hotell|Flanda hotellby|Dcapital hotel|Deurostop orebro|Dgustaf wasa hotel|Dhotel anno 1937|Kt 108|Jbentleys|Kotnia|Jcarlia|Kity gavle|Korallen|Jgamla teatern|Jhalland|Jkarlaplan|Jnorra vattern|Jpark astoria|Jroyal|Jscheele|Ktatt katrineholm|Kvava|Jtranas statt|Lollhattan|Jvarnamo|Il ett|Khudik|Kkarlshamn|Klerdalshoejden|Ljungby|Ksoderh|Is & resorts|Dkom hotel stockholm|Dmalmia hotel|Hö arena hotel|Eotala stadshotell|Dnya star hotel|Dplaza hotel|Fus|H aby hotel|Iedward hotel|Igrand hotel|T elektra|Kow hotel|Ihotel noble house|Oplaza|Nl boras|Pnordic lund|Jus 57|Ijohn bauer hotel|Ikalmarsund hotell|Ipark airport hotel|Isavoy lulea|Jthlm bromma|Itime hotel|Ivästerviks stadshotell|Eremier|Fincess hotel|Dradmannen|Eoyal star|Dsjofartshotellet|Eolhem hotel|Etrand hotel|Dta inn hotel|Ehe public hotel|Eidbloms hotel|Dvetlanda stadshotell|Eimmerby stadshotell|Erigstad vardshus|1illingehus|2rger jarl|2z apartment gärdet|Ehammarby sjöstad|1jälbo gästhus b&b|2örkebo camping|5fors kajak & hostel|5haga hotell & konferens|Hoch konferens|1låhammarens fjällstation|Dmountain station|1o hotel|3pensionat|2fors hotel|Cl|2husgården hotell & konferens|2lagshotellet|3legården b&b|2oking|7 com|2rgs villahotell|3åkra bed & breakfast|2tanika uppsala|1ranteviks viste|2ink hotell|2oby gästgivaregård|3mmavik hotel|4ölla camping & vandrarhem|2unnby hotel|5sta gård|4tegården|1ull august farm hostel|1w premier collection|3signature collection|1äverli hills|0calmar stadshotell|2mp caroli|4anile|4ing|2pe east|2rlia hotell|4stadcity hostel|2stanea old town hostel|4le house inn|1enter parcs|4ral hotel|7hotellet|7station vandrarhem uppsala|1ity backpackers hostel|5hostel central station|7tel|A örebro|5lodge stockholm|5stay uppsala|4box|4sleep|1larion|7 grand hotel|8hotel arlanda airport terminal|Edraken|Egillet|Frand östersund|Emalmo live|Epost|Esea u|Gnse|Fign|Ftockholm|Ewinn|Gsby|Eörebro|3s på hörnet|2ub med|5wyndham|1omfort hotel|D arlanda airport terminal|Ecity göteborg|Eeskilstuna|Egöteborg|Ehelsingborg|Ejazz|Fönköping|Enorrköping|Eumeå city|Evasteras|Ewinn|Express stockholm central|8suites|2nnect hotel|D arlanda|Ecity|Ekista|Eskavsta airport|Ftockholm|2pperhill mountain lodge|2urtyard|9 marriott|Astockholm|1rafoord place|2owne plaza|2ystal plaza hotel|1urio collection|G by hilton|0dala järna hotell|4rö hotel bellevue|2vids kulle|1en sovande älgen|2sign hotels|3tination by hyatt|1iamond resorts|1ockside hostel old town|5ta hotell|4yard hotel|2rsia hotel & restaurant|2ubletree|2wntown camper|F by scandic|1rottning victorias örlogshem|1ufweholms herrgård|2van hotell|0easyhotel|1dith och julia b&b|1ight rooms|1kebacken hotell & konferens|3rum resort öland|2sjö stadshotell|1lite eden park hotel|6grand hotel gävle|6hotel academia|Ddlon|Drcadia|Cbrage borlänge|Ccarolina tower|Cesplanade|Cideon lund|Cmarina plaza|Jtower|Dimer|Dollberg|Csavoy|Dtockholm plaza|Bs|C of|6palace hotel|8rk avenue hotel|Bhotel|7laza hotel|H malmö|Cörnsköldsvik|6stadshotellet eskilstuna|Kkarlstad|Kluleå|Kvästerås|Mxjö|8ora hotel|Hlet linköping|Lörebro|2lery beach house|1n gaffel kort på maritim|2aforsholm fjällgård|1pokgården|1riksberg hotel & nature reserve|2sta konferens & hotell|1skilstuna stadshotell|2lövs stadshotell|1tt hem|1uroway hotel|1xecutive residency|2pedia|0fabriken furillen|2irmont|2lkenberg strandbad|3u stadshotell|4n strandby främby udde|2miljen ericssons city hotel|2rs hatt|1egens vandrarhem|2ngers husrum|1ide äventyrsby & camping|2nnhamn hostel|2rst camp|A björkäng varberg|Bcity stockholm|Irömstad|Bedsvik grebbestad|Ckudden mariestad|Cnåbadet rättvik|Bfrösön östersund|Bglyttinge linköping|Cunnarso|Bhagön halmstad|Cökensås tidaholm|Bkarlstorp halmstad|Cärradal|Bmalmö|Cellsta borlänge|Coraparken hotel|Bnickstabadet nynäshamn|Borsa dalarna|Bråå vallar helsingborg|Bsolvik|Ctensö kalmar|Cunne fryksdalen|Btylösand|Bvästerås mälaren|Båhus|6hotel|B bengtsfors|Drommaplan|Ccentral|Dhristian iv|Dity eskilstuna|Cdragonen|Cg|Dyllene hornet|Cjönköping|Ergen kock|Cklockargården|Dokoloko|Dungsbron|Cmårtenson|Colofström|Criver c|Doyal|Cstatt|Cvilla långbers|Cwitt|Cörebro|Bs|1jordhotellet|1leninge classic motel|2ygplatshotellet|2ämslätts stiftsgård|1orenom|7 aparthotel lund|Jstockholm alvik|Tkista|8hostel|3sbacka wärdshus|4hems gästgivaregård|2ur points by sheraton|5seasons|1regatten bed & breakfast|3ys hotel|2itiden hotell & kongress|2öjel resort|1ulufjällsgården|2näs ski lodge|2runäset hotell & konferens|1ängelset hotell & konferens|1örsgården fjällhotell|0geijersholms herrgård b&b hotel|2nerator|9 stockholm|1imo herrgård|2ts gård|1o to sleep arvika|2lden tulip|2od morning arlanda|Dhagersten|Flmstad|Eelsingborg|Djonkoping|Dkarlstad city|Eista|Dlund|Dmalmo|Eölndal|Dnykoping|Dvästerås|Dörebro|2teborgs mini hotel|3hem logi|5nburg hostel|3tskär hotell|1rand hotel|B alingsås|Cfalkenberg|Cgävle|Cjönköping|Clysekil|Cmölle|Csaltsjöbaden|Bl bollnäs|Dgävle|Dhörnan|7yatt|4ö beckasin|2ebbestads vandrarhem|3en door hotel|6hotel|4t|3nna hotell|2ipsholms bnb|Bvärdshus|2ythyttans gästgivaregård|2ännagården|2å gåsen|2övelsjön mountain station|As fjällstation|1ullmarsstrand hotell & konferens|1ylle hotell & restaurang brödernas|5ne ratten|8uttern|1ålsjö stiftsgård|2senstugan|1örvälns slott|0h10 hotels|15 hotel|1afsten resort|2gebo b&b|2lltorps gästgiveri|3mstad plaza|2milton old town hostel|3nhotellet kronan|3pton|2nöhus|2paranda stadshotell|2rd rock hotel|2sselbacken|2v & logi skärhamn|3shotellet|2ymarket|9 by scandic|1edemora stadshotell|2lags fjällstation|7mountain station|3lefors herrgård|4stens glashus|3singborg hostel|7egården|2m till gården|3avans fjällcenter|9högfjällshotell|2nsbacka herrgård|2straviken hotell & restaurang|1ilton|6 garden inn|8rand vacations|7hotels & resorts|7stockholm slussen|2ndåsgården hotel & spa|1obo|3y gård|4krok b&b|2liday inn|B express|J & suites|3men bed & breakfast|2me hotel bilan|Colinder munktell|Drgen|Cristol|Bcardinal|Elscrona|Bdrott|Betage|Bkompaniet|Cung oscar|Bmagasinet|Djoren|Cektagonen|Bnorre park|Bodin|Bpackhuset|Claza|Cost|Bslottsparken|Btapto|Cemperance|Buman|Cppsala|Bvictoria|Bwellington|2om home & hotel sollentuna|2rrmundsgarden|2stel|6 bed and breakfast|7dalagatan|7fyristorg|7roddaren|2tel|5 & ristorante bellora|6akerlund|7madeus|9lias hus|7rkaden|7veny bed & breakfast|Cumea|6bema|7illingen|8rger jarl|8shops arms kiruna|Kristianstad|Köping|Jlund|Jmora|Jpiteå|Jsträngnäs|6c stockholm|7arlshamn|7haplin|7oncordia|9tinental|H malmö|6dagmar|7e suede|7iplomat stockholm|7jingis khan|7rott|7uxiana kristianstad|6eggers|7lfverson|7mma|7ntre norr|7splanade|F stockholm|6falsterbohus|7inn|7lora|6gamla stan bw signature collection|8rden|7io bw signature collection|7othia towers|7yllene uttern|7öingehof|6hamngatan 27|7ehrne kök & konferens|8lgeand wisby|9lsten|Es malmgård|7öga kusten|8torget|6ibis|7ndigo|6j a member of design hotels|7okkmokk|6knaust|7ockska gården|7ullaberg|8ng carl|Asbacken|7ärnan|6lapland river|7ilton|7orensberg|7undia|7ysekil|7äckö|6mellanfjärden|8zzo|7årtenson|7ölndals bro|6new bed|7ordica strömsund|6opera|7xelösund|6perolofgården|7igalle|7oint|8seidon|6regina|8isen|7iddargatan stockholm|8val|9erside|Bton|9iera|D strand|7oyal|B göteborg|Cmalmö|6skansen|D båstad|7lottsgården|Cvillan|7tensson|7urte|7vea halmstad|9n vintappare|7öder|9ra berget|6tanum gestgifveri|7erraza|7he weaver|7re små rum|7ylösand|6ullinge|6vanilla|7ictoria|8lla anna|Bn|8ndeus|7on kraemer|7uollerim|7ännäs|6with urban deli|6älvsjö|6åberg centralhotellet|6öresund conference & spa|8gryte|5es meininger|5l|6 & pensionat björkelund|9restaurant solliden|7alderholmen|9fred nobel|8ngöringen|9no 1647|8ppelberg|8qva restaurang & bar|8rkad|7bele|Alevue|8illingen|8jörken|Bnidet|8lå blom|8ode|9gesund|9rgholm|8reda blick|9iggen i åhus|7carl friman|8harlottenberg|8ity|8ontinental stockholm|7dagmar|9lsland|8ialog|8orotea|7edgar & lilla kök|8ken mölndal|8rikslund|7falsterbohus|8isketången|8loras trädgård|8oresta|8ridhemsgatan|8unäsdalen|8yrislund|8ärnlöfs|7gamla fängelset|9rvaren|8illet i köping|Estockholm|8rönfeltsgården|8ästis|8öta|B avenyn|7hackspett|9vanna|Asbaden|8ilda|8jalmar|8ulingen|9mbla|8öga kusten|Aland|9rnan|7isbolaget|7klimpfjäll|9ockargården|8naust|8ong christian|8rabban|Amer|9ingelstaden|Astina|8ung carl|Cgösta|Bsljus budgethotell|9sten|8varntorget|7lappland|9urentius|8illa station|9nnea|9seberg heden|8uspen|7magasin1|9lmen|9rieberg|8oskogen|Asbylund|8ölleberg|7nissastigen|9vå|8ordic|9stalgi|9va|7onyxen|8palen|8skar|7paradis|Ak|8ensionat granparken|8levnagården|7ranten|8eisen|9pet|8onja|9yal|8um oscar|8ättvik|8ådhuset|7s t olof|8avoy|8candic opalen|8iesta|8keppsbron|9övde|8litebaden|9ottsbacken|8olhem park|8tandard|9ensborg|9insen|9orforsen|Btorget|8undbyberg|8vea|B simrishamn|8ödra berget|7temperance|8inget|8oppen|9rnväktaren|Apa pensionat sweden hotels|8uristgården i simrishamn|7uddewalla|8tter inn|7valhall|Asaren|9xblekaregården|8ellingebacken|9sterhavet|8illa rönne|Dvesta|9ndelngallerian|9ta hästen hästveda|8änerport|9rend|9sterås|7wettern|8ilhelmina|7älvdalen|7åre fjällsätra|7örnen|8stergötland|Cmalm|Csund|5s com|2ward johnson|2xton|1usby säteri|3kvarna city hotel|Ahotell & vandrarhem|Astadshotell|1yatt|5 centric|6house|6place|B gothenburg central|6regency|1ällerstugan|4uddens stugby och vandrarhem|2sselby familjehotell|Ey hotel|1ållfjället touriststation|Bs turiststation|2veruds hotell|1ögbo brukshotell|2jdens lågprishotell|2örs gästgifwaregård|0ibis|4 budget|5hotel|5styles|B stockholm odenplan|1cehotel in jukkasjärvi|1glootel lapland|1mmanuelskyrkan|1nnside by melia|8hotel|2sjöns hotell sweden hotels|2tercontinental|G hotels & resorts|1shotellet i jukkasjärvi|1yhf youth hostel zinkensdamm|0ja hotel|2cyz hotel & resort|1dv by hyatt|1ennys hotell och restaurang|1o&joe|2hanssons gårdshotell i roslagen|1umbo stay hotel|Bstf iyhf|1w marriott|B hotels|1ämtkrogen|2rjagården hostel|3nvägshotellet|G skara|3vsöbaden|0kajkanten vrångö|2lk hotel|2ptenshuset bed & breakfast|2rlsborg rum och frukost|5koga stadshotell|Gus|Atownhall|5tad swecamp bomstadbaden|3storp hotel|2trineholms stadshotell|7lund gästgiveri & sjökrog|1ebnekaise fjällstation|Bmountain station|Atoppstugan|2mpinski|1ils hotell & restaurang|2mpton|2sa wärdshus|1larälvens camping|2efstad gård|2impfjällsgården|1olarbyn eco lodge|3bäcks gästgivaregård|2mpassen|2rskullens stugor|4täppans herrgård|2sta boda art hotel|6lodge|1ristianstad stadshotell|2oksta gård|7d herrgård|3nocamping lidköping|4prinsen stockholm|3ppefjäll bed & breakfast|2usenberg herrgård|1ullabygdens bed & breakfast|5gården|Bs wärdshus|4erbacka gästhus|2mla hotel|2ngshaga hotell|5kvarnen borgvik|5ängstorg vandrarhem uppsala|2rorten mösseberg|2st hotell & spa|4camp gamleby|4nära vandrarhem|1varnholmen|2iberg hostel and cottages|8park hotel & conference|1ällan hotell spa konferens|2rrstegens gård|2vlinge gästgivaregård|1ågeröds värdshus tre stjärnor|2seberga gårdshotell & spa|1örunda golf och konferenshotell|0la hotel|2ges motel|2holms stadshotell|2ndsort hostel|9vandrarhemmet|4vetter airport hotel|Bbnb|3gham|7 hotels & resorts|5olmens vandrarhem stf hi|3nalodge|3thotell lögnäs gård|2ponia hotell & konferens|1e mat b&b göteborg city|4eridien|3ski lodge & steakhouse|2var hotell|C & gästgiveri|1idköping stadshotell|3ö värdshus|2ljeholmens stadshotell|3la brunn hostel|6hotellet|E bed & breakfast|6rådmannen|6trulla gårdshotell|4eskogs stiftsgård|2ndesbergs stadshotell|3ne hostel|5platsens hotel & hostel|Jl och vandrarhem|2seberg grand curiosa hotel|2ttle red tree house|2vgrenadjärmässen hotell fest konferens|3in city|6station|1jusdals camping|1odge torsby|532|2rd nelson hotel|1udvika stadshotell|7s stadshotell|2leå bed & breakfast|6stadshotell|2nndörrsstugan|2stigsgården bed & breakfast|2xury collection|1yckåhem lågprishotell och vandrarhem|2dde gård|3mar|6 hotel|1åktatjåkko fjällstation|2ngasjö vandrarhem|4holmen hotell|4shyttans brukshotell|1öderups strandbad hotell & stugby|0m s birger jarl|4juno|1agles smiley inn|2lmfältens logi & konferens|4köpings bad & camping|3ungs camping|2ndarin oriental hotel|2rgretetorps gästgifvaregård|3holmen|3ieholms gästgivaregård|5stad stadshotell|9s stadshotell|3riott|8 autograph collection|9vacation club|3strands havshotell|Bkurhotell|2sthuggsterrassens hostel|2ttisgården bed & breakfast|2udes hotel enskede stockholm|2yfair hotel tunneln|1e by melia|3hotel|3melia|2ininger|2lia|5 hotels & resorts|3lby ör inn|2mory hotel|2rcure|7 hotels|2tro hotel|1gallery|1ikkastugan|2llas villa|6villa|4ennium|2ss clara|1jällbyhus pensionat & stugby|2ölby stadshotell|1oevenpick|2jo hotell|2ment hotels|2ra hotell & spa|3e hotel lund|Bmalmö|3nington hotel bromma|Hstockholm city|3ris hotel|2sebacke hostel|2tala stadshotell|3el l|7 hammarby sjöstad|8stockholm älvsjö|6one|2untain hut såmmarlappa|2xy|1ullbärsgårdens bed and breakfast|4sjö camping|2nkamöllan logi skåne tranås|1åby park & hotell|2lilla hotell & restaurang|1ötesplats borstahusen|2venpick|0nacka stadshotell|2llo|5stugan|2ran hotell|2utic hotell|2vet|1obis|5 hotel stockholm|2fo hotel|2ra stadshotell|3dic choice|7light hotel|5ska folkhögskolan bed and breakfast|3rfly herrgård|4land ymca hostel|4qvarn hotell|4sjön gästgifveri|5kedika hotell gamla järnhandeln|2vasol|3otel|1ya pallas hotel|4skogsgården hostel|2bergets hostel|2ckelbo vandrarhem|2gårds herrgård bed & breakfast|2näs havsbad|5gården hotell & konferens|5hamns golfklubb|1ärebo gårdshotell|2sby slott|3sjö stadshotell|2äs fabriker hotell & restaurang|1åttarö hostel|8vandrarhem|0ocean hotel|1dalgården kurs & konferenshotell|1hboy hotell|1lsnäsgården|1mbergs turisthotell|1rbaden spa & resort|2resta golf & konferens|2sa järnvägshotell|5station bed and breakfast|1ur house|1xgården|1yo hotels|4rooms|0palace hotell|2n pacific|2rk hotel linköping fawlty towers|Al|6yatt|5inn|8 by radisson malmö|5plaza|A hotels|4royal|1ensionat frillesberg|Akajutan i sjötorp|Alövängen|Amullfjället|Aslottstorget|Btrandgården|Böderåsen|9et|1ierre & vacances|2lgrimshotellet|2teå stadshotell|1m & vänner hotel|1olar hotel|3hem bed & breakfast|2p house hotel|2rt hotel|1rins carl|2ofilhotels calmar stadshotell|Dsavoy|3nova hotell & vandrarhem|2ästmyrens vandrarhem|1ullman|0quality airport hotel arlanda stockholm|8hotel|D 11|Ebodensia|Eekoxen|Egalaxen|Flobe|Frand borås|Kkristianstad|Eluleå|Epanorama gothenburg|Grk södertälje city|Frisma|Eroyal corner|Eskellefteå stadshotell|Ftatt|Grawberry arena|Ethe mill|Eview|Ewaterfront|Finn gothenburg|Jhaninge|2eens hotel|0radisson|8 blu|C airport terminal hotel|Dhotel lund|Jmalmö|Juppsala|Dmetropol helsingborg|Driverside|M hotel|Dscandinavia hotel|U göteborg|Dwaterfront hotel stockholm|9collection|9hotels|F americas|9red|2mada|3sjögård hotell|2ntens hotell|2sta arboga|6grums|6hallandsåsen|7åby|6kalmar|6lilla edet|6mariestad|4punkt laxå|1c hotel sports & business|1ed boat mälaren|2ftele wärdshus|2imersholme hotel|3ndeer lodge|2lais & chateaux|2naissance|B hotel|Cmalmö hotel|2sidence inn|3ort yxenhaga|3taurang gillet|2x hotel|4petit|1istafallets camping|2tz carlton|2verside hotel & apartments|1ogenstugan|2mantik|8 hotel|Es|F & restaurants|2nneby brunn hotel spa resort|Dshotell|Epark vandrarhem och b&b|8cityhotell|8havscamping|4ums herrgård|2senhill bed & breakfast|4wood|2yal viking|1uby|2m för resande|2nmarö rum|1ygerfjord hotel & hostel|1ösjöbaden camping & stugby|0salt & sill|4oluokta|4viks stugby & camping|2muelsdals pensionat|2nds hotel|Bl|3kt jörgen park|6olof hotell & krog|1candic|7 alvik|9nglais|9riadne|Avika|8backadal|9illingen|9ollnäs|Arlänge|8ch|9rown|8elmia|9uropa|8ferrum|9rimurarehotellet|8gamla stan|9othenburg central|9rand central|Ehotel|9ällivare|Avle väst|9öteborg central|8hallandia|9elsingborg nord|9otell luleå|Ds|8infra city|8järva krog|8kalmar|Arlskrona|Dtad city|9ista|9lara|Cälven|9ungens kurva|8laholmen|9inköping city|9uleå|8malmö city|9ölndal|8no 25|B53|Arrköping nord|8park|9laza borås|Eumeå|9ortalen|8rubinen|8s t jörgen|9egevång|9jöfartshotellet|9kellefteå|Aogshöjd|Aärholmen|9tar lund|Dsollentuna|Aora hotellet|Ctorget|Arömmen|9wania|9ödertälje|8talk hotel|9riangeln|9äby|8uplandia|Aplands väsby|Ggatan|8victoria tower|Asby|9ärnamo|Asterås|Axjö|8wallin|9inn|8örebro väst|Ansköldsvik|9stersund syd|1elina|3mas hytt och salong|2rgel plaza|1heraton|8 stockholm hotel|1iare fortress hostel|5fortets vandrarhem|2elkentjakkestugan|2gtuna stadshotell|7stiftelsen hotell & konferens|2ljansnäs hotell|2x senses|1jöbo gästgifvaregård|3torps vandrarhem & rum|1kanstulls hostel|3ra stadshotell|2ellefteå stadshotell|3pparholmen nacka|5sdockans camping & vandrarhem|2istar|3varps gästgivaregård|2oogs city bnb|7logi|2rea camping|6vandrarhem|2ultuna brukshotell|2y hotel apartments|K stockholm|Ltornet|3tteholm|2änninge stadshotell|3rgårdshotellet|H hönö|2ålleruds gård|2öna rum fryksta|1lagsta motell & wärdshus|2ottsholmen|8tellet|6kogens vandrarhem|6skogens hostel|1mygehus havsbad|2ådalarö gård|E hotell & spa|1nöå bruk|1ockerslottet hotell|2eder countryhouse & kitchen|2fitel|3o hotel|2lakoop b&b|3sta hotell|3tägtgården|3vikens pensionat|2mmarhemmet soterud|2nder|3fjällsgårdens wärdshus & hotell|1par hotel gårda|Bmajorna|4row hotel|2irit of hven backafallsbyn|3s hotel & hostel|2oton hostel & sportsbar|1t regis|2aby gårdshotell|3dshotellet i solvesborg|Ekristianstad|Knehamn|Elidköping|Eprincess|3ll stråtjära|5mästaregården|3ndard hotel norrköping|El nyköping|3tionen bed & breakfast|4t hassleholm bw signature collection|3y xtra hotel kista|2dshotellet karlskrona|2eam hotel|3iners camping & lodge|3nholmens gårdshotell|4kullens värdshus|4sdalsstugan|4ungsbaden yacht club|2f af chapman skeppsholmen|5igert fjällstuga|Bmountain cabin|5ktse fjällstuga|Amountain cabin|5lesjaure fjällstuga|Emountain cabin|4bunge hostel|4finnhamn vandrarhem|5ältjägaren fjällstuga|Gmountain cabin|4grövelsjön fjällstation & hotell|5öteborg stigbergsliden hostel|Svandrarhem|4hagaby lantgården hostel|5ostel vassbo|4jädraås herrgård|4korrö hotell|5vikkjokk fjällstation|Emountain station|5årsavagge fjällstuga|Fmountain cabin|4landskrona hostel|5ugnåsberget ekohotell|6nndörren fjällstuga|Fmountain cabin|4möja hostel|9vandrarhem|4orsa hostel|4pieskehaure fjällstuga|Gmountain cabin|5ältsa fjällstuga|Bmountain cabin|5årte fjällstuga|Amountain cabin|4ritsem|4serve fjällstuga|Amountain cabin|5ingi fjällstuga|Amountain cabin|6tojaure fjällstuga|Emountain cabin|5tensdalen fjällstuga|Fmountain cabin|6ora kalholmen hostel|Kvandrarhem|8ulvån fjällstation|Emountain station|5ylarna fjällstation|Cmountain station|6ter fjällstuga|Amountain cabin|5älens vandrarhem|5åmmarlappa fjällstuga|4tarfala fjällstuga|Cmountain cabin|5jäktja fjällstuga|Cmountain cabin|5ärnasjö fjällstuga|Dmountain cabin|4vandrarhem blentarp|5iterskalet fjällstuga|Gmountain cabin|5ålåstugan|2iftsgården breidagård|Di undersvik|Drättvik|Dsödra hoka|Dtallnäs|Dåkersberg|2järnholms stiftsgård|2ockholm inn hotel|Jl|3ra herrestad bed&breakfast|7otellet|E bw premier collection|Fi fjällbacka|Fmarkaryd|Fnorrköping|Fosby|6sjofallet mountain lodge|8öfallet fjällstuga|4liens fjällgård|4strand kursgård|4y hotel|B riddargatan|Csignalfabriken|Dtudio malmö|2rand city hotel|7hotel|C stockholm|Cl|D borgholm|6akar hotell & restaurang|6flickornas havshotell|6gårdens wärdshus|6hotellet|6pensionatet|7iren hotell|6ås b&b|4wberry|2udio hotel|3gor|2yrsö skäret hotell & restaurang|1undsgården hotell & konferens|5vall city hotel|3light hotel conference & spa|3web|2re hotel|A by best western algen|Tlen|Srena|Rcenter|Rfocus|Rlagan|Rspanga|Bcollection|Bstudio|1vartsö archipelago hotel and hostel|8skärgårdshotell och vandrarhem|2edtiljas lotstornet|4ängs rum & frukost|3n vintappare|1weden hotels|2iss belhotel|9inn|5otel|1ystrar & bönor bed and breakfast|1älen|5s högfjällshotell|3legården|2ter stadshotell|5s stadshotell|1årjåsjaurestugan|2staholm hotell & konferens|1öderköpings brunn|2råkers stiftsgård|0teatern och järnvägshotellet|2gners|2leborgs slott|1hielska villa fjärdlång|En fjärdlång|1jörns havspensionat|1oftaholm herrgård|5strand hotell|2keryds herrgård|2rekov hotell|3sby camping|1rademark|9 by wyndham|Acollection|Awyndham|3nås stadshotell|2eehotel|4top spa hangout & hotel|2ibe|4ute portfolio|3vago|2osa stadshotell & spa|2unna vandrarhem & konferens|2yde 1303 b&b på österlen|1sielekjåkk|1uringe hotel|4sthotellet mölle|1vå skyttlar|1yringe kurhotell|1ällbergsgårdens hotell|2nnäskröket|0ullångers hotell & restaurang|2vsby herrgård|1meå gamla fängelse|5old prison|1nbound|7 collection|I by hyatt|8hyatt|2cle joes|2ique hotel|2na allakas fjällstuga|Dmountain cabin|1pper house|3sala city hostel|8hotel apartments|8vandrarhem kvarntorget|1rsand resort & camping|3hult hotell|1tsikten|2ter inn|2ö gula villan|4hostel|4inn hostel|4värdshus vandrarhem|0vadstena klosterhotel|9vandrarhem hostel|2isaluokta|2llåsens värdshus|2ndrarhem|A bull august gård|3n spa hotell & konferens|3sbro camping|2rbergs kusthotell|9stadshotell|K & asia spa|9vandrarhem|3mland hotel|2saloppsmålet stf hostel mora målkullan|2ult hotel|1eckefjärdens hotell & konferens|2jby strand hotel|1ictoria tower|6y hotel|2da vättern|2enna house|2ktoria hotell & konferens|2lla akvarellen bed & breakfast|6björkhagen|6dagmar|6evalotta|6floraviola|6källhagen|6luna breakfast hotel|6strandvägen|2mmerby stadshotell|9vandrarhem|2ngåker hotell|2sby fängelse|3tas|6stugan|2ta stenen rum och restaurang|1ox hotel|1ärdshuset engelbrekt|Bhwitan|Blindgården|Cugnet|3namo stadshotell|2sterbacken hotell & konferens|2tternterrassen|2xjö hostel evedal|6stadshotell|1ålådalens fjällstation|2r gård saltsjöbaden|3dnäs stiftsgård|0w hotel|7s|1anbo herrgård|2sa park hotel|2terside mariestad|2xholms hotell|1edevågs herrgård|2inbergs|2lcome hotel barkarby|3lingehus hotel|2stin|1ij trädgårdar|2nstrup hostel|2sby hotell|6jernväg hostel|1orldhotel|As|1ramsta b&b|1yndham|7 garden|9rand|8hotel|1ärdshuset bredaryd|Bc dickens|Bfuruliden|Bpå dal sweden hotels|0ystad camping|6saltsjöbad|0zleep|5 hotel|B upplands väsby|Bs|0älgbergets bed & breakfast|2vdalens camping|1ngavallen|0åh stiftsgård|2us gästgivaregård|5resort|1kerblads hotell gästgiveri spa|1re|2jäng camping & stugor sommarvik|2sunda strandbad|0öijared resort|1lme prästgård gästgiveri|1rebro city hostel|2ums nygård gårdshotell|1stads gästgivaregård|3er malma hotell|5hamn guesthouse|9s pensionat|5sunds camping", "0bostadsrättsföreningen|1redablick|2f|0fastum|0hsb brf|4göteborg|4malmö|4stockholm|0nabo|0riksbyggen brf|0samfällighet|Csförening|1bc|1impleko|1veriges bostadsrättscentrum|0täby fastighetsförvaltning|0vägförening", "0afa försäkring|1lecta|2lianz|7 versicherung|1mf|1nticimex försäkringar|1tlantica|0barnförsäkring|1liwa|5 livförsäkring ömsesidigt|6skadeförsäkring|0chubb|0dina försäkringar|0ergo direkt|Bversicherung|5versicherung|2ika försäkring|2v|1uro accident|4peiska erv|0folksam|7 liv|1utur|1örsäkringskassan avgift|0gjensidige|1ouda|1reenfee|0hela försäkring|0ica banken försäkring|4försäkring|1f försäkring|3skadeförsäkring|1nkomstförsäkring|0kammarkollegiet|0lf liv|1ivförsäkring|1änsförsäkringar|0manypets|2pfre|1oderna försäkringar|2vestic|0nordeuropa försäkring|0olycksfallsförsäkring|0paydrive|1rudential|0sjukförsäkring|1kandia|7 liv|2ånska brand|1olid försäkring|1pp|1vedea|3land|3nska kredit|8sjö|0trygg hansa|0unionen försäkring|0wakam|0zurich", "0baby & barn|4björn|4land|4shop|2rnens hus|4mat|4omsorg|4vagnslandet|1r leksaker|1ugaboo|2sfabriken|0chicco|0emmaljunga|1xtra leker|0fritids|7klubb|1örskola|7eavgift|0h&m kids|0jollyroom|9 se|0kappahl kids|0lego store|2kaffären|3extra|3ia|3land|3platsen|3saksaffären|2os lekland|1illagunga|2ndex kids|0mothercare|0pyret|0reima|0semper|1kolbarnomsorg|1tokke|3r & liten|5och liten|0toys r us", "0advisa|1k nordic|1lektum|1ros kapital|2vato|0bluestep bank|1rocc|1ynk|0cashbuddy|1entrala studiestödsnämnden|4um|1oeli finance|1redway|1sn|0ferratum|0gf money|0intrum|6 justitia|0kommuninvest|1ronofogden|0lendo|1oanstep|2well|1ån & spar bank|3a|3ebolaget|0marginalen bank|1edmera bank|1oneygo|1yntro|0nordax|6 bank|4ea finans privatlån|3thmill|0payex|0riverty|0sambla|1iemens financial services|1vea inkasso|0telia finance|1f bank|1horn|0visma collectors|0wasa kredit|0zmarta", "0aik|1kademikerförbundet ssr|3via|0bk häcken|1yggnads|0centerpartiet|1ostco medlemskap|0djurgården|4skyddet|0fackavgift|4förbundet|2stighets|1inansförbundet|1riluftsfrämjandet|1ysioterapeuterna|0gs facket|0hammarby|2ndelsanställdas förbund|1otell och restaurang facket|1rf|0idrottsklubb|1f metall|2k|0journalistförbundet|1usek|0kommunal|2nsumentverket|1ristdemokraterna|0ledarna|1iberalerna|1ärarförbundet|0malmö ff|1edlemsavgift|7kap|1ff|1iljöpartiet|1oderaterna|2tormännen|0naturskyddsföreningen|5vetarna|0officersförbundet|0polisförbundet|0saco|1eko|1ocialdemokraterna|1portklubb|1sr|1tf|1venska kyrkan|8turistföreningen|3rigedemokraterna|7s arkitekter|9ingenjörer|9lärare|0tco|0unionen|0villaägarna|2sion|1änsterpartiet|1årdförbundet", "0arelion|0chilimobil|1omviq|0fello|0globalconnect|0halebop|3lon|2ppy mobil|1i3g|0lyca|4mobile|0millicom|1obilabonnemang|1ybeat|2newsdesk|0neonode|2t4mobility|3more|0ooredoo|0parlino|0relacom|0sinch|1oluno|1pring mobil|1tandard radio & telefon|1venska umts nät|0telavox|3e2|4ca|4nor|4topia|3ia|5 company|4gent telecom|1re|0ventelo|1imla", "0af bostäder|2b|1kelius|0balder|1locket bostad|2uestep|1oplats|2stadsbolaget|7förmedlingen|0castellum|0danske hypotek|0familjebostäder|0heimstaden|2mbla|1omeq|1sb|1ypoteket|2resgästföreningen|0ica banken bolån|0landshypotek|0micasa|1kb|0nordea hypotek|0poseidon|0qasa|0riksbyggen|4hem|0samtrygg|1bab|1eb bolån|1gs studentbostäder|1kandiabanken bolån|1tabelo|3dshypotek|2ena fastigheter|2ockholms stads bostadsförmedling|Ahem|2udentbostäder|1venska bostäder|1wedbank hypotek|0uppsalahem|0vasakronan|1ictoriahem|0wallenstam|1illhem", "0alatest|2ibaba|3express|1mazon|6 marketplace|7se|2zn|4 mktp|0banggood|1estsecret|1locket|1oozt outlet|1utikskassa|0cdon|0dartbutik|0ebay|1tsy|0facebook marketplace|1yndiq|0ginza|0ideal of|0joom|0lyko com|0nerdsbelike com|0olivkassen|0pango|2ypal|1ricerunner|3sjakt|0qvc|0stonefactory se|0temu|1radera|0vinted|2skan system|0wish|0zalando lounge", "0ace & tate|0eyewear|0glasögonbutiken|0interoptik|0lensstore|4way|1insbutiken|1ouis optik|0nyströms optik|0oliver peoples|1pticalia|4k|5er|0smarteyes|1pecsavers|A opticians|1unglass hut|1ynoptik|3sam|0vision express", "0egen överföring|3t konto|0internöverföring|0mellan egna konton|0omföring|0överföring eget", "0aimo|4 park|1pcoa|5 flow|0contipark|0easypark|1uropark|0flowbird|0kontrollavgift|0malmö parkering|1obill|0onepark|0p bolaget|1arkera|6ing göteborg|9savgift|4man|4ster|0q park|1park|0smspark|1tockholm parkering", "05asec|0lacolada|0martinizing dry cleaning|0revolution laundry|0speed queen|0wash me", "0agria|0dina djur|1jurförsäkring|0folksam djur|0hedvig djur|0if djurförsäkring|0lassie|0petson|0sveland djur|Cförsäkringar", "0arken zoo|0bozita|1uddy|0djuraffär|4magazinet|1ogman|6 and friends|0granngården djur|0hundbutiken|0jollyroom djur|0kattbutiken|0musti|0ollipet|0petlife|0royal canin|0zoo|3 se|3butik|3plus|3zoo", "0apohem|3tea|5k|6 365|7hjärtat|7shop|6et|6sgruppen|0doz apotek|0farmaci|0kronans apotek|0lloyds apotek|0meds", "0arlanda express|2riva|0bivab|1lekingetrafiken|1olt scooter|1us4you|3strafiken stockholm björknäs värmdö|0city bikes|0dalatrafik|1estination gotland|1in tur|1onkey republic|2tt|0finnlines|1jällexpressen|1lixbus|2ygbussarna|0gotlandsbolaget|9uss|0hallandstrafiken|0jönköpings länstrafik|0kalmar länstrafik|1eolis|1rösatågen|0lime|2nbike|1undahoj|1änstrafiken|C kronoberg|0mohlins bussar|1tr nordic|1älartåg|0nobina|2rrbottens länstrafik|4tåg|2va bus|0orusttrafiken|0polferries|1ågatågen|0ryde|0scandlines|1kånetrafiken|1l|2 access|1tena line|2ockholm city bikes|Fferries|3rstockholms lokaltrafik|2yr & ställ|C göteborg|4söbolaget|1webus|1örmlandstrafiken|0tallink silja|1ier|1rafik ab stockholm kvarnholmen|Ksödra lidingön|3nsdev|1t line|1åg i bergslagen|0ul|1pplands lokaltrafik|0viking line|1l|1oi|1y bus4you|6s|1ärmlandstrafik|2stmanlands lokaltrafik|4trafik|0waxholmsbolaget|0x trafik|0öresundståg|1stgötatrafiken", "0ace hardware|1lcro|1nticimex|1sian paints|0badrumshuset|2uhaus|7 se|1eckers|2ijer|6 byggmaterial|1iltema|1lack red white|1oconcept|2hus|2lia|1ravida|1ulthaup|1yggbutik|4hemma|4max|0chilli|1las ohlson|1olorama|1ramo|0dulux|5 paints|2x|1änisches bettenlager|0elektriker|2on|1m home|1nglish cottage|0flugger|2yttfirma|1reska|1urniturebox|0gaggenau|2utier|1olvpoolen|0h&m home|1appy homes|1elpling|2mfrid|3städarna|2rman miller|1ornbach|2use of ideas|1ästens|1ööks|0ikea|1xina|0jem & fix|4fix|3&fix|1otun|1ula|1ysk|4 romania|0k rauta|1artell|1ohler|0leroy merlin|1igne roset|1åsbolaget|3smed|0mio|3 möbler|2ttanbud|1rs mighetto|1usterring|1ömax|0natuzzi|1omor|2rdiska galleriet|4sjö idehus|0offerta|0poggenpohl|2ltrona frau|2rcelanosa|2ttery barn|C kids|0ramirent|1oche bobois|2t avdrag|1um21|1örläggaren|0sector alarm|3uritas|2rvicefinder|1herwin williams|G paint store|Ms|1iematic|1ova|1tihl|2ädarna|1venska hem|6t tenn|5sons i lammhult|1ängjätten|0tempur|1rademax|0vardaga|1erisure|1vs firma|0west elm|1oody|0xl bygg|1xxlutz|0yatas|5 bedding|0zara home", "0adam albin|1grikultur|1mbiance a vindåkra|2sterdam|1ndrum|1pplebees|9 bar and grill|Agrill and bar|Aneighborhood bar and grill|Ngrill & bar|1rctura|7 restaurang & skybar|2holma dance floor|Bsbana|8nord|1sian kitchen|2pholmen|1t nordhem|1xmarbrygga havskrog|0bad och societetshuset i hjo|2r il chiosco|4minimal|3nhuskällaren|3rels burgers|2sement|3tard burger|Es|1b q chicken|1eckasinen|2llmansro|2nne pasta bar|1hoga|1ishops arms|3tro odette|7sågen|1lackbird|2oom in the park|2å örn|1ockholmen hav & restaurang|2dega|1rasserie godot|2yggans lilla kök|Bttle kitchen|1uenos aires|2rger grill|1äckahästen|B hamngatan|1åtshaket|1ödkaregården|0cake house|2rlssons fårö|2ttelin|1eleste|1hilis|1razy horse|1uisine libanaise|0da vinci|2niel berlin krog|Ds krog|2shi|1en gröne jägaren|5yldene freden|3nys|1ykarbaren sandhamn|0ebbas mat & kaffe|1dsbacka krog|1gg & milk|1kstedt|1lephant|2is corner|1riks|1toile|0fader höks krog|2ggens krog|2r i hatten|1em små hus|1innhamns inn|Akrog|1jäderholmarnas krog|1lippin burgers|1ogo de chao|1ramfickans restaurang|3ntzen|3sses hamburgare|2ont pockets restaurant|1urusunds hamnkrog|1yrens ölkafe|1äviken magasinet|1örgyllda lejonet|Avinfatet|7ta remmaren|0gaetanos pizza italiana|2nsu köket|2stro|6logik|1illestugan jerntorget|2ttans kbb on ornö|Cpå ornö|1ondolen|1rand restaurant|2ill 77|3nda inn|7wärdshus|1unters korv|1yllene cirkeln|8prag|8skeppet|0hagabions cafe|2idilao hot pot|2lv grek plus turk|2mburgerbörs|2rd rock cafe|E stockholm|3rys|2sselssons macklucka|1eaven 23|2nriksberg|1oly greens|2ok big swing skansen|3ters|2tel furusund|5l furusund|1uman|0i love pizza|1ca restauranger|1l forno|1mouto|1ndia gate|2gmarsö bread and breakfast|9krog|9tavern|2n krypin|4of ulriksdal|4rostock|2ternational house of pancakes|0jensens b fhus|9ofhus|2ppes gästgiveri|7inn|1ohnny rocket|Ds|2nes grill|0kafe de luxe|2iser|2khuset|2ruizawa sushi bar|2shi|2talin|1nystaforsen|1oh phangan|2izen|2nditori kampanilen|3stnärsbaren|1ulturhuset skagerack|1varnen|5huskällaren|5krogen grönhögen|1ällaren aurora|9draken|9fimmelstång|9krypin|9remmaren|Aostock|9stjärnan|9tre kronor|1åken|1öpmanholms lanthandel och grill|Docal shop|0la pasta veloce|2mmet & grisen|2uters cafe mat och deli|1es poissonniers|1iljans krog|3la haket & ninas bod|8sselbacken|7ornsberg|6napoli|6tavernan|2nne sushi|5krogen|1oving hut|0m s patricia|1anfreds brasserie|2rinade kitchen & bar|2sten|2x hamburgerrestauranger|Ds|4restaurang|Dt|1ealtime malatang|3t the greek|4balls for the people|2nzies lounge landvetter|2stiza|2xikanska monarkin|1ission bbq|3ter york|1ommas krog|2reno pizza|2sebacke etablissement|1ucho macho taqueria|1äster anders|7gudmunds källare|1öja hamnbar|7rbor bar|5inn|5värdshus|0nackanäs värdshus|1ew california taco shop|4dannekrogen|1ordsee|3rbacka värdshus|1ya dannekrogen|1ämdö bageri|8kery|6inn solvik|6krogen solvik|1åttarö krog|8restaurant|0oaxen krog|6skärgårdskrog|1learys|2ive garden|C italian kitchen|1perakällaren|1rnö krog|1utback steakhouse|I national|0papparich|2sha grill|2tricia|1elicana|8 chicken|4kan|2ntaboden|1hils burger|1inchos|2zza express|5boden ornö|4eria|8 bruno franco|1lace|1m & vänner|1ong|1roject|1umphuset borstahusen|0ramen ya|1ed lobster|2staurang|A 28|Bbellini|Clå porten|Bcassi|Bengelen|Bfontainebleau|Bjohanna|Bkastellet|Blorensberg|Bmasten|Bnanna svartz|Boasen|Bprinsen|Bskanskvarn|Ctrandbaren idöborg|Eömmen|Cvinn|Dängen|Btennstopet|Crädgårn|Cyrol|Bvästerhus|Böstergök|Aakademien|Aen blå porten|9t 55 an|Bcitadel|Bkometen|Blöwenbräu|K stockholm|Bmichel|Bstrandbaren idöborg|Cvängen|Btattersall|Cegner|Aen|1iche|1omantik restaurant|2segarden|4ndals värdshus|1uby tuesday|1äkan|1ånö brygga|0s ta clara bierhaus|1abbatsbergs värdshus|2izeriya|2ltimporten canteen|2ndhamn dive bar|9inn|9mission house bed & breakfast|Gshuset bed & breakfast|8s sailing hotel|Beglarhotell|Avärdshus|3negårdens pizzeria|1eafood gastro|2glarbaren|B utö|2ikoen|1hahs|5 halal food|3keys|1ignum|2xtens bodega|1jöbaren|1k mat & människor|2anshof|2omakare källaren|1nyt pilsnercafe|1ocietetshuset eksjö|Fi eksjö|Hmarstrand|Höregrund|Fmarstrand|Föregrund|2lrosen|1panska köket|1tadshuskällaren|3tion linne|2igbergets shangri la|2ora gungan skansen|4källaren|4torgskällaren|2rindbergs champagne club|2ure|5hof|1ushi sho|6yama|5bar|1vartsö inn|8krog|2edtiljas restaurang|Kt|1ågverket|9 restaurant ornö|1ödra stadshuskällaren|0tai shanghai|2j mahal|2ko sushi|1eatergrillen|2nnstopet|2rra nova|2xas longhorn|1gi fridays|1hörnströms kök|1ony roma|9s|1re indier|4remmare|4tunnor|2oll garden restaurant|5gården restaurang|0ulla winbladh|2riksdals värdshus|1topia jazz|2ö bakfickan|5ykrog|4grill kiosk|9kiosk|4inn|4värdshus|0vadstena rådhus|9town hall|2piano|1egabaren|1ollmers|1yn restaurant|1ärdshuset månen|Bsvanen|0wagamama|2rm bath house in hjo|1estra piren|1ärdshuset bellmansro|Bulla winbladh|0zum franziskaner|G stockholm|0åke hans|0östergök|5malmskällaren", "0aktiespararna|1vanza|6 bank|0collector sparkonto|0fondförsäljning|4köp|0isk|0kameo|0lysa|0marginalen sparkonto|0nordnet|7 bank|0opti|0pensionsmyndigheten|0resurs sparkonto|1ocker sparkonto|0savelend|1bab sparkonto|1parkonto|0tessin", "0a b lunds biografteater|1storia cinemas|1xel johnson gruppen|0bagaren och kocken|1earplay|2rnt i lund|1ilstereohörnan|1jörn biografer|1o ohlsson i tomelilla|1uketten|0care of beds|1heapy|1inemascenen i katrineholm|0dorre|1pj workspace|1ufry|2xiana|0eko stormarknad|1lectro world|3iko|1urostar|0filmindustri ab skandia|0gekås|1rekiska kolgrillsbaren|1öta film|0hallbergs guld|Esmeds|1b kristianstads biografteater|0iduna|1nterjakt|0k bygg|1lockmaster|1ooperativa förbundet|0lifvs|0m&s outlet|1arks & spencer outlet|2tmissionen|0nordisk film biografer|3ma|1uance|0optik smarteyes|0pincho nation|2ppifoder|2tchers|1revex|0q star|0rasta|1ema 1000|2staurang norma|0sandrew film & teater|Gheater|1f studios|1tockholms ljusbutik|1venska förenade biograf|3riges fria bygghandlare|0tempo varuhus|1retti se|0united rentals|1r & penn|0vajper|2penation|0world duty free|0xl byg|0ymca shop|0zocalo", "01password|0adobe|1ftonbladet|B plus|1llt om|1nthropic|1pple|5 com bi|Cll|1vast|0babbel|2nkid|1inero|2twarden|1lizzard|1okio|2nnier news|1umble|0canva|1hatgpt|1laude ai|0dagens industri|7nyheter|1i se|2scord|1n se|1ropbox|1uolingo|0epic games|1vernote|1xpressen|7vpn|0f secure|1igma|2tbit|1ortnox|0garmin|1ithub|1odaddy|2ogle|6 one|7play|7storage|7workspace|1öteborgs posten|0headspace|1inge|1ubspot|0icloud|1tunes|0kaspersky|1indle|2vra|0lastpass|1inkedin|1oopia|0mailchimp|2tch com|1cafee|1icrosoft|9 365|2necraft|1obilt bankid|2jang|1ullvad|0nitro|1ordvpn|3ton|2tion|1y teknik|0office 365|1ne com|2lyfans|1penai|0paradox|2treon|1eloton|1roton|0readly|1iot games|1oblox|0samsung cloud|1chibsted|1hopify|1lack|1parbanken app|2eedledger|2iris|1quarespace|1team|2rava|1ubstack|2percell|2rfshark|1vd|2enska dagbladet|1wish handel|1ydsvenskan|0telegram premium|1inder|1odoist|0visma|0wint|4 se|2x|1ordpress|0x premium|1box|0zinio|1oom", "0amazon music|7prime|1pple music|6tv|1udible|0bookbeat|2xer tv access|0c more|1ineasterna|1more|1omhem play|1runchyroll|0dazn|1eezer|1iscovery|3ney|6 plus|1play|1raken film|0ea play|1urosport|0f1 tv|0google play music|0hbo|3 max|0mubi|0netflix|2xtory|1fl gamepass|1intendo switch online|0paramount|1laystation plus|2ex|1odme|1rime video|1s plus|0skyshowtime|1oundcloud|1potify|1torytel|1vt play|0tele2 play|3ia play|1idal|1v4|3 play|1witch|0ubisoft|1r play|0viaplay|0xbox game pass|0youtube|7 premium", "0amazon fresh|1xfood|0bergendahls|0carrefour|1ity gross|1oop|4 extra|5forum|5konsum|5nord|6ära|2stco|5utter|As|0dia market|0eataly|1urocash|4spar|0favör|1lygfyren|1ood basics|0godtlevererat|0handlarn|1ellofresh|2mköp|6 göteborg nordenskiöldsgatan|7stigbergstorget|1ötorgshallen|0ica|3 kvantum|4maxi|4nära|4stormarknad|5upermarket|F majorna|4to go|1ntermarche|0jacks|0konsum|0lidl|4 deutschland|5espana|5france|5italia|5polska|2lla coop|6ica|2nas matkasse|0m&s foodhall|4simply food|1arket basket|4s & spencer|F foodhall|Gsimply food|2t se|3hem|3smart|3öppet|2xi ica|8 stormarknad|1iddagsfrid|1otatos|0netto|1ära dej|0paradiset|0rfsu|0snabbgross|1tora coop|1uper c|0tempo|2sco|5 extra|6metro|6superstore|0urban deli|0willys|6 hemma|0östermalms saluhall", "0swish|5 betalning|6inbetalning", "0budbee food|0deliveroo|0foodora|7 market|0getir|1orillas|0hungrig|0just eat|0mathem express|0onlinepizza|0tiptapp|0uber eats|4eats|0wolt", "0bolt|0cabonline|0free now|4now|0lyft|0minitaxi|0sverige taxi|7taxi|0taxi|4 020|68|5göteborg|5kurir|5malmö|5skåne|6tockholm|5uppsala|1opcab|0uber|0yango", "0a train|1b storstockholms lokaltrafiks järnvägar|0db bahn|1eutsche bahn|1sb|0eslöv hörby järnväg|1urail|0flixtrain|0green cargo|0hector rail|1ultsfred westerviks jernväg|0inlandsbanan|2terrail|0jernhusen|1ärnvägsaktiebolaget göteborg särö|0kalmar läns östra järnvägsaktiebolag|1innekulle lidköpings järnväg|1ristianstad hässleholms järnvägar|0lidköping håkantorps järnväg|Akållands järnväg|1kab malmtrafik|0mellersta hallands järnväg|1tr express|1älardalstrafik|1önsterås åseda järnvägsaktiebolag|0norra hälsinglands järnväg|0orsatåg|0resplus|1ush rail|0sj|2 biljett|3öresund|1kara kinnekulle vänerns järnväg|2övde axvalls järnväg|1nälltåget|1tatens järnvägar|1undsvalls järnvägsaktiebolag|1vensk tågkraft|1ydvästen|1ölvesborg kristianstads järnväg|Bolofström älmhults järnväg|0trafik ab saltsjöfart|6förbundet uppsala norrland|3inline|3nsitio|1ågab|0uddevalla lelångens järnväg|1nionsexpressen|1ppsala enköpings järnväg|3tåget|0vetlanda järnvägar|1y|2 tåg|1ästtåg|2te rail|0westervik åtvidaberg bersbo järnväg|0ängelholm klippans järnväg|0åg vintjärns järnväg", "0ducati|0indian motorcycle|0kawasaki|0nio space|0polaris|0suzuki|6 motorcycle india|0triumph|0vespa|0yamaha", "0abisko|1imo share|1lamo|2batros travel|2ebacken|1pollo|1vis|0big travel|2rka|1jörkliden|4nberget|5rike|1ogesund slott|1ranäs|1udget|6 car rental|1yråsen|0carlstens fästning|1olor line|0destination kalmar|Cuppsala|2tur|1fds|0enterprise|A car rental|1uropcar|0flight centre|1ritidsresor|1unäsfjällen|1ästningsguiden i norr|1öreningen femörefortet|0getaround|1reen motion|C car rental|5mobility|0hallstabacken|2mmarbybacken|1emavan|2rtz|5 car rental|6rent a car|1urtigruten|1ögfjället|0icehotel|1dre fjäll|0kajvall|1ilroy|2runa|2ttelfjäll|1läppen|1uoni|0liseberg hotell|1ocaliza|2fsdalen|0mabi|4rent|0nazar|0okq8 biluthyrning|0polisen pass|0ramundberget|1esebyrå|3ia|1iksgränsen|1omme alpin|0sixt|4 rent a car|1ki resort storklinten|4sunne|1nappcar|1oliabacken|3resor|1ta travel|3toil biluthyrning|2f resor|2orklintens vintersportanläggning|2römma turism & sjöfart|1unwing|1älenfjällen|0tandå valley|5dalen|1homas cook|2rifty|7 car rental|1icket resebyrå|1rillevallen|1ui|2ro|0ullådalen|0vallåsen|1emdalen|1ing|2sit vadstena|0åre ski area|0örbyhus gods", "0a kassa|7n|8 för journalister|1kademikernas|D a kassa|3ssa|1lfa kassan|1rbetslöshetskassa|0byggnads a kassa|0electricians a kassa|3ktrikernas a kassa|0fastighets a kassa|1inans och försäkringsbranschens a kassa|0gs a kassa|0handelsanställdas a kassa|1otell och restauranganställdas a kassa|0if metalls a kassa|1ka|0journalisternas a kassa|0kommunals a kassa|0ledarnas a kassa|1ivsmedelsarbetarnas a kassa|1ärarnas a kassa|0musikernas a kassa|0pappers a kassa|0seko a kassa|1kogs och lantarbetarnas a kassa|1måföretagarnas a kassa|1t a kassa|1veriges lärares a kassa|1äljarnas a kassa|0tjänstemännens a kassa|1ransports a kassa|0union akassa|5ens a kassa|0vision a kassa|1årdförbundets a kassa", "0bilförsäkring|1robizz|0epass24|0fordonsskatt|0infrastrukturavgift|0motala bro|0parktrade europe|0resundsbron|0sundsvallsbron|1vinesundsbron|0trafikförsäkringsföreningen|6verket|3nsportstyrelsen|2ängselskatt|0vägtull|0öresundsbron", "0anicura|3mal clinic|0blå stjärnans djursjukhus|0distriktsveterinärerna|1jurklinik|Aen|4sjukhuset|0evidensia|0firstvet|0jordbruksverket veterinär|0smådjurskliniken|0veterinär|9kliniken|3zoo", "0avfall|0fortum värme|0göteborg energi fjärrvärme|0kretslopp och vatten|0laholmsbuktens va|0midvatten|1älarenergi fjärrvärme|0norrvatten|1sva|0ragn sells|1enova|1oslagsvatten|0solör bioenergi|2por|2tare|3ning|1tockholm exergi|Avatten|G och avfall|1ydvatten|2sav|0tekniska verken fjärrvärme|2lge nät|0uppsala vatten|0va syd|2tten och avfall"];
+/* @dict-end */
+// Runtime index for the built-in dictionary: keys are matched against the start of the cleaned description,
+// tolerant of the bank's quirks (å/ä/ö folded to a/o, dropped or turned into a space; 12-char truncation).
+let _dict = null;
+function dictIndex() {
+  if (_dict) return _dict;
+  const DIG = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', idx = new Map(), short = new Map();
+  const put = (j, cat, name) => { if (j.length < 3) { short.set(j, [j, cat, name]); return; } const p = j.slice(0, 3); if (!idx.has(p)) idx.set(p, []); idx.get(p).push([j, cat, name]); };
+  DICT_DATA.forEach((s, ci) => {
+    const cat = DICT_CATS[ci]; let prev = '';
+    if (!s) return;
+    for (const e of s.split('|')) {
+      const k = prev.slice(0, DIG.indexOf(e[0])) + e.slice(1); prev = k;
+      const a = foldText(k).replace(/[^a-z0-9&]/g, ''), b = k.replace(/[åäö]/g, '').replace(/[^a-z0-9&]/g, '');
+      put(a, cat, k); if (b !== a && b.length >= 3) put(b, cat, k);
+    }
+  });
+  return (_dict = { idx, short });
+}
+function dictMatch(desc) {
+  const toks = tokensOf(desc); if (!toks.length) return null;
+  const j = toks.join(''), ends = new Set(); let p = 0; for (const t of toks) { p += t.length; ends.add(p); }
+  const D = dictIndex();
+  let best = null;
+  for (const c of D.idx.get(j.slice(0, 3)) || []) if (j.startsWith(c[0]) && ends.has(c[0].length) && (!best || c[0].length > best[0].length)) best = c;
+  if (!best && D.short.has(toks[0])) best = D.short.get(toks[0]);
+  if (!best && j.length >= 7 && String(desc).replace(/\s+$/, '').length >= 10) {   // truncated bank text: description is the start of a longer name
+    const cands = (D.idx.get(j.slice(0, 3)) || []).filter(c => c[0].length > j.length && c[0].startsWith(j));
+    if (cands.length && cands.every(c => c[1] === cands[0][1])) best = cands[0];
+  }
+  return best && catByName(best[1]) ? { category: best[1], name: best[2] } : null;
+}
+// Order: your own rules > built-in merchant dictionary > built-in keyword rules > close (fuzzy) matches.
+// Sets t.catSource ('rule' | 'dict' | 'keyword' | 'fuzzy' | '') and t.dictName for dictionary matches.
 function categorize(t) {
   const clean = cleanDescription(t.desc);
-  const c = matchRule(clean) || matchRule(t.desc) || fuzzyMatchRule(clean);
-  if (c) return c;
-  if (t.amount > 0) { const inc = S.categories.find(c => c.type === 'income'); return inc ? inc.name : 'Other'; }
-  return 'Other';
+  const src = (s, c, n) => { t.catSource = s; t.dictName = n || ''; return c; };
+  let c = matchRule(clean, true) || matchRule(t.desc, true);
+  if (c) return src('rule', c);
+  const d = dictMatch(clean) || dictMatch(foldText(t.desc));
+  if (d && !(t.amount > 0 && catType(d.category) === 'expense' && isSalaryText(clean))) return src('dict', d.category, d.name);
+  c = matchRule(clean, false) || matchRule(t.desc, false);
+  if (c) return src('keyword', c);
+  c = fuzzyMatchRule(clean);
+  if (c) return src('fuzzy', c);
+  if (t.amount > 0) { const inc = catByName('Other income') || S.categories.find(c => c.type === 'income'); return src('', inc ? inc.name : 'Other'); }
+  return src('', 'Other');
 }
+const isSalaryText = s => SALARY_RE.test(' ' + foldText(s) + ' ');
 function catByName(n) { return S.categories.find(c => c.name === n); }
+function mainOf(n) { const c = catByName(n); return c && c.parent ? c.parent : n; }
+const isMain = n => { const c = catByName(n); return !!c && !c.parent; };
+const subsOf = main => S.categories.filter(c => c.parent === main);
+const mainCats = () => S.categories.filter(c => !c.parent);
+const catLabel = n => { const c = catByName(n); return c && c.parent ? c.parent + ' › ' + c.name : n; };
+const inCat = (leaf, sel) => !sel || leaf === sel || mainOf(leaf) === sel;   // a main category filter includes its subcategories
 function catType(n) { const c = catByName(n); return c ? c.type : 'expense'; }
-function catColor(n) { const c = catByName(n); return c ? c.color : '#999'; }
+function catColor(n) { if (n === PAYOFF_KEY) return '#adb5bd'; const c = catByName(n); return c ? c.color : '#999'; }
 function recategorizeAll() {
   invalidateRules();
   let changed = 0;
@@ -1054,6 +1215,27 @@ function colOptions(cfg, sel) {
   return `<option value="-1"${sel < 0 ? ' selected' : ''}>— none —</option>` +
     columnNames(cfg).map((n, i) => `<option value="${i}"${i === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
 }
+// Accounts: which bank account / credit card a file belongs to, remembered per file layout (header row).
+function layoutSig(cfg) {
+  const hdr = cfg.headerRow >= 0 && cfg.rows[cfg.headerRow] ? cfg.rows[cfg.headerRow].map(c => String(c).trim().toLowerCase()).join('|') : 'nohdr' + colCount(cfg) + '|' + String(cfg.name).replace(/[\d_.-]+/g, '').toLowerCase();
+  return (cfg.kind || 'csv') + '|' + hdr;
+}
+function defaultAccountChoice(cfg) {
+  const rem = S.layouts[layoutSig(cfg)];
+  if (rem && accById(rem)) return { mode: 'existing', id: rem };
+  const base = String(cfg.name).replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30) || 'Account';
+  return { mode: 'new', type: cfg.invertSuggested ? 'card' : 'bank', name: base };
+}
+function resolveAccount(cfg) {
+  const ch = cfg.acc || defaultAccountChoice(cfg); let id = ch.id;
+  if (ch.mode === 'new') {
+    let n = (ch.name || '').trim() || (ch.type === 'card' ? 'Credit card' : 'Bank account'), k = 2; const base = n;
+    while (S.accounts.some(a => a.name === n)) n = base + ' ' + k++;
+    id = uid(); S.accounts.push({ id, name: n, type: ch.type === 'card' ? 'card' : 'bank', match: '', countPayoffs: true });
+  }
+  if (id) S.layouts[layoutSig(cfg)] = id;
+  return id || '';
+}
 function showMappingModal(cfg) {
   const remaining = importQueue.length;
   openModal('Import: ' + cfg.name + (remaining ? `  (+${remaining} more file${remaining > 1 ? 's' : ''})` : ''), '<div id="mapRoot"></div>', [
@@ -1061,6 +1243,7 @@ function showMappingModal(cfg) {
     { label: 'Import transactions', cls: 'primary', id: 'doImport', keepOpen: true, onClick: () => {
       const res = buildTxns(cfg);
       if (!res.txns.length) { toast('Nothing to import — check the column mapping.', true); return false; }
+      const accId = resolveAccount(cfg); res.txns.forEach(t => t.account = accId);
       const { added, dups } = addTxnsDeduped(res.txns);
       save();
       if (added) ui.month = null;
@@ -1089,6 +1272,7 @@ function renderMapping(cfg) {
       ${cfg.kind === 'xlsx'
         ? `<div class="field"><label>Sheet</label><select data-k="sheet">${cfg.book.sheets.map((sh, i) => `<option value="${i}"${i === cfg.sheetIndex ? ' selected' : ''}>${esc(sh.name)} (${sh.chart ? 'not a worksheet' : sh.rows.length + ' row' + (sh.rows.length === 1 ? '' : 's')}${sh.hidden && !sh.chart ? ', hidden' : ''})</option>`).join('')}</select></div>`
         : `<div class="field"><label>Delimiter</label><select data-k="delim">${Object.keys(delimName).map(d => `<option value="${d === '\t' ? 'tab' : esc(d)}"${d === cfg.delim ? ' selected' : ''}>${delimName[d]}</option>`).join('')}</select></div>`}
+      ${(() => { const ch = cfg.acc || (cfg.acc = defaultAccountChoice(cfg)); return `<div class="field"><label for="mapAcc">Account (bank account or credit card)</label><select id="mapAcc" data-acc>${S.accounts.map(a => `<option value="${esc(a.id)}"${ch.mode === 'existing' && ch.id === a.id ? ' selected' : ''}>${esc(a.name)}${a.type === 'card' ? ' (card)' : ''}</option>`).join('')}<option value="__newbank"${ch.mode === 'new' && ch.type === 'bank' ? ' selected' : ''}>＋ New bank account…</option><option value="__newcard"${ch.mode === 'new' && ch.type === 'card' ? ' selected' : ''}>＋ New credit card…</option></select>${ch.mode === 'new' ? `<input type="text" id="mapAccName" data-accname value="${esc(ch.name)}" placeholder="Name, e.g. Swedbank or SEB Kort" style="margin-top:6px" aria-label="New account name">` : ''}<span class="hint">Remembered for files with this layout.</span></div>`; })()}
       <div class="field"><label>Header row</label><select data-k="headerRow">${headerOpts}</select></div>
       <div class="field"><label>Date column</label><select data-k="colDate">${colOptions(cfg, cfg.colDate)}</select></div>
       <div class="field"><label>Date format</label>${sel('dateFmt', [['auto', 'Auto (per row)'], ['YMD', 'YYYY-MM-DD'], ['DMY', 'DD/MM/YYYY'], ['MDY', 'MM/DD/YYYY']])}</div>
@@ -1111,6 +1295,9 @@ function renderMapping(cfg) {
     ${res.errors.length ? `<div class="err hint" style="margin-bottom:6px">${res.errors.map(esc).join('<br>')}</div>` : ''}
     <div class="mini-table"><table><thead><tr><th>Date</th><th>Description</th><th class="num">Amount</th><th>Category (auto)</th></tr></thead>
       <tbody>${preview.map(t => `<tr><td>${esc(t.date)}</td><td>${esc(t.desc)}</td><td class="num ${t.amount > 0 ? 'pos' : ''}">${esc(fmt(t.amount))}</td><td>${esc(categorize(t))}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No rows parsed yet</td></tr>'}</tbody></table></div>`;
+  const accSel = $('[data-acc]', root);
+  if (accSel) accSel.onchange = () => { const v = accSel.value; cfg.acc = v.startsWith('__new') ? { mode: 'new', type: v === '__newcard' ? 'card' : 'bank', name: v === '__newcard' ? 'Credit card' : (cfg.acc && cfg.acc.name) || 'Bank account' } : { mode: 'existing', id: v }; renderMapping(cfg); };
+  const accName = $('[data-accname]', root); if (accName) accName.oninput = () => { cfg.acc.name = accName.value; };
   $$('[data-k]', root).forEach(el => el.addEventListener('change', () => {
     const k = el.dataset.k;
     if (k === 'sheet') Object.assign(cfg, buildXlsxConfig(cfg.name, cfg.book, +el.value));
@@ -1232,19 +1419,73 @@ function daysLeftText(key) {
   const n = daysBetween(t, p.end) + 1;
   return n === 1 ? 'last day of this period' : `${n} days left`;
 }
-function summarize(p) {
-  let spent = 0, income = 0, count = 0; const byCat = {}, byMerchant = {};
+/* ---------------- Accounts & credit-card payoffs ----------------
+   A payoff (Transfers › Credit card payment) is the sum of purchases already on the card statement, so it is a transfer.
+   If that card's own statement isn't imported for the payoff's billing window, it can count as spending instead
+   (per card, or for payoffs not linked to any card), so spending isn't lost. Card purchases count on their own dates. */
+const PAYOFF_CAT = 'Credit card payment', PAYOFF_KEY = 'Card payoffs (not itemised)';
+const accById = id => S.accounts.find(a => a.id === id);
+const accName = id => { const a = accById(id); return a ? a.name : ''; };
+const cardAccounts = () => S.accounts.filter(a => a.type === 'card');
+function cardMatchers(a) { return (a.match || a.name).split(',').map(x => x.trim()).filter(Boolean).map(compilePattern).filter(Boolean); }
+function cardFor(t) {
+  if (t.category !== PAYOFF_CAT) return null;
+  const a = accById(t.account); if (a && a.type === 'card') return null;   // the card's own "payment received" line
+  if (t.payCard) { const c = accById(t.payCard); if (c) return c; }
+  const f = ' ' + foldText(t.desc) + ' ', c = ' ' + foldText(cleanDescription(t.desc)) + ' ';
+  return cardAccounts().find(card => cardMatchers(card).some(re => re.test(f) || re.test(c))) || null;
+}
+let _cardTxCache = { v: -1, m: new Map() };
+function cardTxnsBetween(cardId, from, to) {
+  if (_cardTxCache.v !== _dataVersion) _cardTxCache = { v: _dataVersion, m: new Map() };
+  const k = cardId + '|' + from + '|' + to; if (_cardTxCache.m.has(k)) return _cardTxCache.m.get(k);
+  const r = S.txns.filter(x => x.account === cardId && x.date >= from && x.date <= to && x.category !== PAYOFF_CAT && catType(x.category) !== 'transfer');
+  _cardTxCache.m.set(k, r); return r;
+}
+// 'transfer' (excluded from spending) or 'spending'
+function payoffTreatment(t) {
+  if (t.category !== PAYOFF_CAT) return null;
+  const a = accById(t.account); if (a && a.type === 'card') return 'transfer';
+  const card = cardFor(t);
+  if (!card) return S.settings.countUnlinkedPayoffs ? 'spending' : 'transfer';
+  if (cardTxnsBetween(card.id, addDays(t.date, -62), t.date).length) return 'transfer';   // card statement imported for this billing window
+  return card.countPayoffs ? 'spending' : 'transfer';
+}
+// Compare a payoff with the card's purchases: previous calendar month, the month before, or since the previous payoff.
+function payoffMatch(t) {
+  const card = cardFor(t); if (!card) return null;
+  const m = t.date.slice(0, 7), prevM = addMonths(m, -1), prev2 = addMonths(m, -2);
+  const lastEnd = ym => addDays(addMonths(ym, 1) + '-01', -1);
+  const prevPay = S.txns.filter(x => x !== t && x.category === PAYOFF_CAT && x.date < t.date && cardFor(x) === card).map(x => x.date).sort().pop();
+  const cands = [[prevM, prevM + '-01', lastEnd(prevM)], [prev2, prev2 + '-01', lastEnd(prev2)]].map(([ym, a, b]) => ({ label: monthLabel(ym), a, b }));
+  if (prevPay) cands.push({ label: 'since ' + fmtDate(prevPay), a: addDays(prevPay, 1), b: t.date });
+  let best = null;
+  for (const c of cands) {
+    const list = cardTxnsBetween(card.id, c.a, c.b); if (!list.length) continue;
+    const total = round2(-list.reduce((s, x) => s + x.amount, 0)), diff = round2(Math.abs(t.amount) - total);
+    if (!best || Math.abs(diff) < Math.abs(best.diff)) best = { card: card.name, label: c.label, total, diff, n: list.length };
+  }
+  return best;
+}
+function summarize(p, acc) {
+  if (acc === undefined) acc = ui.acc || '';
+  let spent = 0, income = 0, count = 0; const byCat = {}, byMain = {}, byMerchant = {};
   for (const t of S.txns) {
     if (p !== 'all' && periodOf(t.date) !== p) continue;
+    if (acc && t.account !== acc) continue;
     count++;
     const ty = catType(t.category);
-    if (ty === 'transfer') continue;
+    if (ty === 'transfer') {
+      if (t.category === PAYOFF_CAT && payoffTreatment(t) === 'spending') { spent -= t.amount; byCat[PAYOFF_KEY] = (byCat[PAYOFF_KEY] || 0) - t.amount; byMain[PAYOFF_KEY] = (byMain[PAYOFF_KEY] || 0) - t.amount; }
+      continue;
+    }
     if (ty === 'income') { income += t.amount; continue; }
     spent -= t.amount;   // refunds in expense categories reduce spending
     byCat[t.category] = (byCat[t.category] || 0) - t.amount;
+    const mn = mainOf(t.category); byMain[mn] = (byMain[mn] || 0) - t.amount;
     if (t.amount < 0) { const mk = merchantKey(t.desc); const o = byMerchant[mk] || (byMerchant[mk] = { name: mk, total: 0, n: 0 }); o.total -= t.amount; o.n++; }
   }
-  return { spent: round2(spent), income: round2(income), net: round2(income - spent), count, byCat, byMerchant };
+  return { spent: round2(spent), income: round2(income), net: round2(income - spent), count, byCat, byMain, byMerchant };
 }
 // Recurring = same merchant, similar amount (±4%, ±25% for bills), in >= 2 distinct months, at most ~1 charge per month, fairly regular.
 function detectRecurring() {
@@ -1290,7 +1531,7 @@ function donutSVG(items, total, centerLabel) {
       const frac = it.value / total; if (frac <= 0) continue;
       const a1 = a0 + frac * Math.PI * 2, large = a1 - a0 > Math.PI ? 1 : 0;
       const [x0, y0] = pt(R, a0), [x1, y1] = pt(R, a1), [x2, y2] = pt(r, a1), [x3, y3] = pt(r, a0);
-      paths += `<path class="slice" data-cat="${esc(it.name)}" d="M${x0},${y0} A${R},${R} 0 ${large} 1 ${x1},${y1} L${x2},${y2} A${r},${r} 0 ${large} 0 ${x3},${y3} Z" fill="${it.color}" stroke-width="1.5" style="cursor:pointer"><title>${esc(it.name)}: ${esc(fmt(it.value))} (${(frac * 100).toFixed(1)}%)</title></path>`;
+      paths += `<path class="slice" ${it.subs ? `data-drill="${esc(it.key)}"` : `data-cat="${esc(it.key === PAYOFF_KEY ? PAYOFF_CAT : (it.key || it.name))}"`} d="M${x0},${y0} A${R},${R} 0 ${large} 1 ${x1},${y1} L${x2},${y2} A${r},${r} 0 ${large} 0 ${x3},${y3} Z" fill="${it.color}" stroke-width="1.5" style="cursor:pointer"><title>${esc(it.name)}: ${esc(fmt(it.value))} (${(frac * 100).toFixed(1)}%)</title></path>`;
       a0 = a1;
     }
   }
@@ -1320,7 +1561,7 @@ function trendSVG(months, data, selected) {
 }
 
 /* ---------------- Views ---------------- */
-const ui = { view: 'dashboard', month: null, q: '', fCat: '', fMonth: '', fType: '', sortKey: 'date', sortDir: -1, limit: 150, ruleQ: '', reviewIncome: false };
+const ui = { view: 'dashboard', month: null, q: '', fCat: '', fAcc: '', acc: '', drill: '', fMonth: '', fType: '', sortKey: 'date', sortDir: -1, limit: 150, ruleQ: '', reviewIncome: false };
 
 function renderAll() {
   applyTheme();
@@ -1359,7 +1600,10 @@ function renderDashboard() {
     if (Math.abs(d) < 0.5) return `<div class="delta">No change vs ${esc(monthLabel(prevMonth(p)))}</div>`;
     return `<div class="delta"><span class="${up === higherIsGood ? 'down' : 'up'}">${up ? '▲' : '▼'} ${Math.abs(d).toFixed(0)}%</span> vs ${esc(monthLabel(prevMonth(p)))}</div>`;
   };
-  const catItems = Object.entries(sum.byCat).filter(([, v]) => v > 0.004).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value, color: catColor(name) }));
+  if (ui.drill && !(sum.byMain[ui.drill] > 0.004)) ui.drill = '';
+  const drill = ui.drill;
+  const src = drill ? Object.fromEntries(Object.entries(sum.byCat).filter(([k]) => mainOf(k) === drill && k !== PAYOFF_KEY)) : sum.byMain;
+  const catItems = Object.entries(src).filter(([, v]) => v > 0.004).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name: drill && name === drill ? name + ' (general)' : name, key: name, value, color: catColor(name), subs: !drill && subsOf(name).length > 0 }));
   const catTotal = catItems.reduce((a, b) => a + b.value, 0);
   const merchants = Object.values(sum.byMerchant).sort((a, b) => b.total - a.total).slice(0, 8);
   const mMax = merchants.length ? merchants[0].total : 1;
@@ -1372,9 +1616,11 @@ function renderDashboard() {
   const bMonth = p === 'all' ? months[months.length - 1] : p;
   const bsum = p === 'all' ? summarize(bMonth) : sum;
   const budgetCats = S.categories.filter(c => c.type === 'expense' && +S.budgets[c.name] > 0);
+  const spentIn = (sm, n) => (isMain(n) ? sm.byMain[n] : sm.byCat[n]) || 0;
 
   el.innerHTML = `
   <div class="toolbar"><h2>Overview${p !== 'all' && p.length === 10 ? `<div class="hint" style="font-weight:500;font-size:13px;margin-top:2px">Salary period ${esc(periodRangeText(p))}${daysLeftText(p) ? ' · <b>' + daysLeftText(p) + '</b>' : ''}</div>` : p !== 'all' && daysLeftText(p) ? `<div class="hint" style="font-weight:500;font-size:13px;margin-top:2px">${daysLeftText(p)}</div>` : ''}</h2>
+    ${S.accounts.length ? `<select id="accSel" aria-label="Account"><option value="">All accounts</option>${S.accounts.map(a => `<option value="${esc(a.id)}"${a.id === ui.acc ? ' selected' : ''}>${esc(a.name)}${a.type === 'card' ? ' (card)' : ''}</option>`).join('')}</select>` : ''}
     <div class="month-nav"><button class="btn icon" id="mPrev" title="Previous period" aria-label="Previous period">‹</button>${monthSelectHTML('monthSel', p, true)}<button class="btn icon" id="mNext" title="Next period" aria-label="Next period">›</button></div>
   </div>
   <div class="grid kpis">
@@ -1384,9 +1630,10 @@ function renderDashboard() {
     <div class="card kpi"><div class="label">Transactions</div><div class="value">${sum.count}</div><div class="delta">${p === 'all' ? months.length + (S.settings.periodMode === 'calendar' ? ' month' : ' period') + (months.length === 1 ? '' : 's') + ' of data' : esc(monthLabel(p, true))}</div></div>
   </div>
   <div class="grid cols-2" style="margin-top:16px">
-    <div class="card"><h3>Spending by category <small>${esc(monthLabel(p))}</small></h3>
-      ${catItems.length ? `<div class="chart-wrap">${donutSVG(catItems, catTotal, 'spent')}
-        <div class="legend">${catItems.map(c => `<div class="row" data-cat="${esc(c.name)}" title="Show transactions"><span class="sw" style="background:${c.color}"></span><span class="nm">${esc(c.name)}</span><span class="amt">${fmt(c.value)}</span><span class="pct">${(c.value / catTotal * 100).toFixed(0)}%</span></div>`).join('')}</div></div>`
+    <div class="card"><h3>${drill ? `<button class="btn small" id="drillBack" aria-label="Back to all categories">‹ All</button> ${esc(drill)}` : 'Spending by category'} <small>${esc(monthLabel(p))}${S.accounts.length ? ' · ' + esc(ui.acc ? accName(ui.acc) : 'all accounts') : ''}</small></h3>
+      ${catItems.length ? `<div class="chart-wrap">${donutSVG(catItems, catTotal, drill ? 'in ' + drill.toLowerCase() : 'spent')}
+        <div class="legend">${catItems.map(c => `<div class="row" ${c.subs ? `data-drill="${esc(c.key)}" title="Show subcategories"` : `data-cat="${esc(c.key === PAYOFF_KEY ? PAYOFF_CAT : c.key)}" title="Show transactions"`}><span class="sw" style="background:${c.color}"></span><span class="nm">${esc(c.name)}${c.subs ? ' <span class="muted">›</span>' : ''}</span><span class="amt">${fmt(c.value)}</span><span class="pct">${(c.value / catTotal * 100).toFixed(0)}%</span></div>`).join('')}
+        ${drill ? `<div class="row" data-cat="${esc(drill)}" title="Show all ${esc(drill)} transactions"><span class="nm muted">Show all ${esc(drill)} transactions →</span></div>` : ''}</div></div>`
         : '<div class="empty">No spending in this period</div>'}
     </div>
     <div class="card"><h3>${S.settings.periodMode === 'calendar' ? 'Monthly trend' : 'Trend by salary period'} <small>last ${tMonths.length} ${S.settings.periodMode === 'calendar' ? 'month' : 'period'}${tMonths.length === 1 ? '' : 's'}</small></h3><div id="trend">${trendSVG(tMonths, tData, p)}</div></div>
@@ -1401,22 +1648,28 @@ function renderDashboard() {
     </div>
   </div>
   ${budgetCats.length ? `<div class="card" style="margin-top:16px"><h3>Budgets <small>${esc(monthLabel(bMonth, true))}</small></h3>
-    <div class="grid cols-2" style="gap:12px 24px">${budgetCats.map(c => budgetBarHTML(c.name, bsum.byCat[c.name] || 0, +S.budgets[c.name])).join('')}</div></div>` : ''}`;
+    <div class="grid cols-2" style="gap:12px 24px">${budgetCats.map(c => budgetBarHTML(catLabel(c.name), spentIn(bsum, c.name), +S.budgets[c.name])).join('')}</div></div>` : ''}`;
   $('#monthSel').onchange = e => { ui.month = e.target.value; renderDashboard(); };
   const step = dir => { const list = ['all'].concat(months); const i = Math.min(list.length - 1, Math.max(0, list.indexOf(ui.month) + dir)); ui.month = list[i]; renderDashboard(); };
   $('#mPrev').onclick = () => step(-1); $('#mNext').onclick = () => step(1);
   $$('#trend [data-month]').forEach(r => r.addEventListener('click', () => { ui.month = r.dataset.month; renderDashboard(); }));
   $$('#view-dashboard [data-cat]').forEach(r => r.addEventListener('click', () => gotoTx({ fCat: r.dataset.cat })));
+  $$('#view-dashboard [data-drill]').forEach(r => r.addEventListener('click', () => { ui.drill = r.dataset.drill; renderDashboard(); }));
+  if ($('#drillBack')) $('#drillBack').onclick = () => { ui.drill = ''; renderDashboard(); };
+  if ($('#accSel')) $('#accSel').onchange = e => { ui.acc = e.target.value; renderDashboard(); };
   $$('#view-dashboard [data-merchant]').forEach(r => r.addEventListener('click', () => gotoTx({ q: r.dataset.merchant })));
 }
 function gotoTx(f) { Object.assign(ui, { q: '', fCat: '', fType: '', fMonth: ui.month === 'all' ? '' : ui.month, limit: 150 }, f); ui.view = 'transactions'; renderAll(); window.scrollTo(0, 0); }
 
-function catOptions(sel, includeAll) {
-  return (includeAll ? `<option value="">All categories</option>` : '') + S.categories.map(c => `<option value="${esc(c.name)}"${c.name === sel ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+function catOptions(sel, includeAll, exclude) {
+  return (includeAll ? `<option value="">All categories</option>` : '') + mainCats().filter(m => !(exclude && exclude.includes(m.name))).map(m => {
+    const subs = subsOf(m.name), o = (n, l) => `<option value="${esc(n)}"${n === sel ? ' selected' : ''}>${esc(l)}</option>`;
+    return subs.length ? `<optgroup label="${esc(m.name)}">${o(m.name, m.name + (includeAll ? ' (all)' : ' (general)'))}${subs.map(c => o(c.name, c.name)).join('')}</optgroup>` : o(m.name, m.name);
+  }).join('');
 }
 function filteredTxns() {
   const q = ui.q.trim().toLowerCase();
-  const list = S.txns.filter(t => (!ui.fCat || t.category === ui.fCat) && (!ui.fMonth || periodOf(t.date) === ui.fMonth) &&
+  const list = S.txns.filter(t => inCat(t.category, ui.fCat) && (!ui.fAcc || t.account === ui.fAcc) && (!ui.fMonth || periodOf(t.date) === ui.fMonth) &&
     (!ui.fType || (ui.fType === 'in' ? t.amount > 0 : t.amount < 0)) &&
     (!q || (t.desc + ' ' + cleanDescription(t.desc) + ' ' + t.note + ' ' + t.category + ' ' + merchantKey(t.desc) + ' ' + Math.abs(t.amount).toFixed(2)).toLowerCase().includes(q)));
   const k = ui.sortKey, d = ui.sortDir;
@@ -1438,13 +1691,14 @@ function renderTransactions() {
   const list = filteredTxns();
   const out = list.filter(t => t.amount < 0).reduce((a, t) => a + t.amount, 0), inn = list.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0);
   const arrow = k => ui.sortKey === k ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : '';
-  const filtered = ui.q || ui.fCat || ui.fMonth || ui.fType;
+  const filtered = ui.q || ui.fCat || ui.fMonth || ui.fType || ui.fAcc;
   el.innerHTML = `
   <div class="toolbar"><h2>Transactions</h2><button class="btn" id="addTx">＋ Add</button><button class="btn" id="expCsv" title="Export the listed transactions as CSV">Export CSV</button></div>
   <div class="card">
     <div class="toolbar" style="margin-bottom:6px">
       <input type="search" id="txSearch" placeholder="Search description, note, amount…" value="${esc(ui.q)}" style="flex:1;min-width:180px" aria-label="Search">
       <select id="fCat" aria-label="Category">${catOptions(ui.fCat, true)}</select>
+      ${S.accounts.length ? `<select id="fAcc" aria-label="Account"><option value="">All accounts</option>${S.accounts.map(a => `<option value="${esc(a.id)}"${a.id === ui.fAcc ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
       <select id="fMonth" aria-label="Month"><option value="">All periods</option>${allMonths().reverse().map(m => `<option value="${m}"${m === ui.fMonth ? ' selected' : ''}>${esc(monthLabel(m, true))}</option>`).join('')}</select>
       <select id="fType" aria-label="Direction"><option value="">In &amp; out</option><option value="out"${ui.fType === 'out' ? ' selected' : ''}>Money out</option><option value="in"${ui.fType === 'in' ? ' selected' : ''}>Money in</option></select>
       ${filtered ? '<button class="btn small" id="clrF">Clear filters</button>' : ''}
@@ -1455,8 +1709,8 @@ function renderTransactions() {
       <th class="sortable" data-sort="category">Category${arrow('category')}</th><th class="sortable num" data-sort="amount">Amount${arrow('amount')}</th><th></th></tr></thead>
       <tbody>${list.slice(0, ui.limit).map(t => `<tr data-id="${t.id}">
         <td class="c-date">${esc(fmtDate(t.date))}</td>
-        <td class="c-desc tx-desc" title="Bank text: ${esc(t.desc)}">${esc(displayName(t.desc))}${isViaKlarna(t.desc) ? ' <span class="pill" style="font-size:11px;padding:0 6px;font-weight:500" title="Paid via Klarna">via Klarna</span>' : ''}${isSalary(t) ? ` <span class="pill salary-pill" style="font-size:11px;padding:0 6px;font-weight:500" title="${t.salary === true ? 'Marked as salary by you' : 'Detected as salary'}: a new period starts on this date">salary${t.salary === true ? ' ✓' : ''}</span>` : ''}${cleanDescription(t.desc) !== t.desc.replace(/\s+/g, ' ').trim() ? `<span class="tx-raw">${esc(t.desc)}</span>` : ''}${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}</td>
-        <td class="c-cat"><select class="cat-select" data-catsel aria-label="Category">${catOptions(t.category)}</select></td>
+        <td class="c-desc tx-desc" title="Bank text: ${esc(t.desc)}">${esc(displayName(t.desc))}${isViaKlarna(t.desc) ? ' <span class="pill" style="font-size:11px;padding:0 6px;font-weight:500" title="Paid via Klarna">via Klarna</span>' : ''}${isSalary(t) ? ` <span class="pill salary-pill" style="font-size:11px;padding:0 6px;font-weight:500" title="${t.salary === true ? 'Marked as salary by you' : 'Detected as salary'}: a new period starts on this date">salary${t.salary === true ? ' ✓' : ''}</span>` : ''}${cleanDescription(t.desc) !== t.desc.replace(/\s+/g, ' ').trim() ? `<span class="tx-raw">${esc(t.desc)}</span>` : ''}${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}${S.accounts.length > 1 && t.account ? `<span class="tx-raw">${esc(accName(t.account))}</span>` : ''}${payoffInfoHTML(t)}</td>
+        <td class="c-cat"><select class="cat-select" data-catsel aria-label="Category">${catOptions(t.category)}</select>${t.catSource === 'dict' && !t.catManual ? `<span class="auto-pill" title="Auto: matched the built-in merchant list (${esc(titleCase(t.dictName))}). Pick another category to correct it; you'll be offered a rule.">auto</span>` : ''}</td>
         <td class="c-amt num ${t.amount > 0 ? 'pos' : ''}">${fmt(t.amount)}</td>
         <td class="c-act row-actions"><button class="btn small" data-edit>Edit</button> <button class="btn small danger" data-del title="Delete" aria-label="Delete">✕</button></td></tr>`).join('')}
       </tbody></table></div>
@@ -1466,9 +1720,10 @@ function renderTransactions() {
   const s = $('#txSearch');
   s.oninput = () => { ui.q = s.value; ui.limit = 150; clearTimeout(renderTransactions._t); renderTransactions._t = setTimeout(() => { renderTransactions(); const n = $('#txSearch'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 200); };
   $('#fCat').onchange = e => { ui.fCat = e.target.value; renderTransactions(); };
+  if ($('#fAcc')) $('#fAcc').onchange = e => { ui.fAcc = e.target.value; renderTransactions(); };
   $('#fMonth').onchange = e => { ui.fMonth = e.target.value; renderTransactions(); };
   $('#fType').onchange = e => { ui.fType = e.target.value; renderTransactions(); };
-  if ($('#clrF')) $('#clrF').onclick = () => { ui.q = ui.fCat = ui.fMonth = ui.fType = ''; renderTransactions(); };
+  if ($('#clrF')) $('#clrF').onclick = () => { ui.q = ui.fCat = ui.fMonth = ui.fType = ui.fAcc = ''; renderTransactions(); };
   if ($('#more')) $('#more').onclick = () => { ui.limit += 300; renderTransactions(); };
   $('#addTx').onclick = () => editTxn(null);
   $('#expCsv').onclick = () => exportCSV(list);
@@ -1483,9 +1738,40 @@ function renderTransactions() {
   tb.onchange = e => {
     if (!e.target.matches('[data-catsel]')) return;
     const t = S.txns.find(x => x.id === e.target.closest('tr').dataset.id); if (!t) return;
-    t.category = e.target.value; t.catManual = true; save();
-    offerRule(t);
+    t.category = e.target.value; t.catManual = true; t.catSource = 'manual'; save();
+    if (t.category === PAYOFF_CAT) chooseCard([t], () => {}); else offerRule(t);
   };
+}
+function payoffInfoHTML(t) {
+  if (t.category !== PAYOFF_CAT) return '';
+  const a = accById(t.account); if (a && a.type === 'card') return '<span class="tx-raw">Card payment received (not spending)</span>';
+  const card = cardFor(t), tr = payoffTreatment(t);
+  if (!card) return `<span class="tx-raw">Card payoff · ${tr === 'spending' ? 'counted as spending (no card linked)' : 'not counted'}</span>`;
+  const m = tr === 'transfer' ? payoffMatch(t) : null;
+  const what = m ? (Math.abs(m.diff) < 1 ? `matches ${esc(card.name)} statement of ${fmt(m.total)} (${esc(m.label)})` : `${esc(card.name)} purchases ${esc(m.label)}: ${fmt(m.total)}, difference ${fmt(Math.abs(m.diff))}`) : '';
+  return `<span class="tx-raw payoff-info">Pays off ${esc(card.name)} · ${tr === 'spending' ? 'counted as spending until the card statement is imported' : 'transfer (card purchases are listed separately)'}${what ? ' · ' + what : ''}</span>`;
+}
+// Link payoffs to a card (existing or new); the card remembers the payoff text, and a rule is saved.
+function chooseCard(txns, done) {
+  const t = txns[0], kw = merchantKey(t.desc).toLowerCase();
+  openModal('Which card does this pay off?', `
+    <p style="margin-top:0">${esc(displayName(t.desc))} ${fmt(t.amount)}. Card payoffs are transfers: the purchases are on the card's own statement. Until that statement is imported they can still count as spending.</p>
+    <div class="field"><label for="ccSel">Card</label><select id="ccSel">${cardAccounts().map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}<option value="__new"${cardAccounts().length ? '' : ' selected'}>＋ New card…</option><option value="__none">Not linked to a card</option></select></div>
+    <div class="field" id="ccNewF"${cardAccounts().length ? ' style="display:none"' : ''}><label for="ccName">New card name</label><input type="text" id="ccName" value="${esc(titleCase(kw))}"></div>
+    <div class="field"><label for="ccPat">Payoff text on your bank statement (keyword or /regex/)</label><input type="text" id="ccPat" value="${esc(kw)}"></div>`, [
+    { label: 'Skip', cancel: true, onClick: () => { setTimeout(done, 0); } },
+    { label: 'Link payoff', cls: 'primary', onClick: () => {
+      const v = $('#ccSel').value, pat = $('#ccPat').value.trim();
+      if (pat && !compilePattern(pat)) { toast('Invalid pattern', true); return false; }
+      let card = null;
+      if (v === '__new') { card = { id: uid(), name: $('#ccName').value.trim() || 'Credit card', type: 'card', match: pat, countPayoffs: true }; S.accounts.push(card); }
+      else if (v !== '__none') { card = accById(v); if (pat && !cardMatchers(card).some(re => re.test(' ' + foldText(t.desc) + ' '))) card.match = (card.match ? card.match + ', ' : '') + pat; }
+      txns.forEach(x => { x.payCard = card ? card.id : ''; });
+      if (pat && !S.rules.some(r => r.user && r.pattern.toLowerCase() === pat.toLowerCase() && r.category === PAYOFF_CAT)) S.rules.unshift({ id: uid(), pattern: pat, category: PAYOFF_CAT, user: true });
+      invalidateRules(); save(); renderAll(); setTimeout(done, 0);
+    } }
+  ]);
+  $('#ccSel').onchange = e => { $('#ccNewF').style.display = e.target.value === '__new' ? '' : 'none'; };
 }
 // After a manual category change: offer to apply to similar merchants and save as a rule.
 function offerRule(t) {
@@ -1516,6 +1802,8 @@ function editTxn(t) {
       <div class="field" style="grid-column:1/-1"><label for="eDesc">Description (original bank text)</label><input type="text" id="eDesc" value="${esc(d.desc)}" placeholder="e.g. Coffee shop">${isNew ? '' : `<span class="hint">Shown as: <b>${esc(displayName(d.desc))}</b></span>`}</div>
       <div class="field"><label for="eAmt">Amount</label><input type="number" step="0.01" min="0" id="eAmt" inputmode="decimal" value="${d.amount ? Math.abs(d.amount) : ''}" placeholder="0.00"></div>
       <div class="field"><label for="eCat">Category</label><select id="eCat"><option value="__auto"${isNew ? ' selected' : ''}>Auto (from rules)</option>${catOptions(isNew ? '' : d.category)}</select></div>
+      ${S.accounts.length ? `<div class="field"><label for="eAcc">Account</label><select id="eAcc"><option value="">—</option>${S.accounts.map(a => `<option value="${esc(a.id)}"${a.id === d.account ? ' selected' : ''}>${esc(a.name)}${a.type === 'card' ? ' (card)' : ''}</option>`).join('')}</select></div>` : ''}
+      <div class="field" id="eCardF"${d.category === PAYOFF_CAT ? '' : ' style="display:none"'}><label for="eCard">Pays off card</label><select id="eCard"><option value="">Auto (by payoff text)</option>${cardAccounts().map(a => `<option value="${esc(a.id)}"${a.id === d.payCard ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ New card…</option></select><input type="text" id="eCardName" placeholder="New card name" style="display:none;margin-top:6px"></div>
       <div class="field"><label for="eSal">Salary (starts a new period)</label><select id="eSal"><option value="auto"${d.salary === undefined ? ' selected' : ''}>Auto${isNew ? '' : ' (' + (isSalary(Object.assign({}, d, { salary: undefined })) ? 'detected: yes' : 'detected: no') + ')'}</option><option value="yes"${d.salary === true ? ' selected' : ''}>Yes, this is salary</option><option value="no"${d.salary === false ? ' selected' : ''}>No, not salary</option></select></div>
       <div class="field" style="grid-column:1/-1"><label for="eNote">Note (optional)</label><input type="text" id="eNote" value="${esc(d.note)}"></div>
     </div>`, [
@@ -1528,14 +1816,26 @@ function editTxn(t) {
       const obj = t || { id: uid(), source: 'manual' };
       obj.date = date; obj.desc = desc; obj.amount = round2(($('#eType').value === 'in' ? 1 : -1) * Math.abs(a)); obj.note = $('#eNote').value.trim();
       const sv = $('#eSal').value; obj.salary = sv === 'yes' ? true : sv === 'no' ? false : undefined;
+      if ($('#eAcc')) obj.account = $('#eAcc').value;
+      let cardId = $('#eCard').value;
+      if ($('#eCat').value === PAYOFF_CAT) {
+        if (cardId === '__new') { const card = { id: uid(), name: $('#eCardName').value.trim() || 'Credit card', type: 'card', match: merchantKey(desc).toLowerCase(), countPayoffs: true }; S.accounts.push(card); cardId = card.id; }
+        obj.payCard = cardId;
+        const pat = merchantKey(desc).toLowerCase();
+        const card = accById(cardId);
+        if (card && pat && pat !== '(unknown)' && !cardMatchers(card).some(re => re.test(' ' + foldText(desc) + ' '))) card.match = (card.match ? card.match + ', ' : '') + pat;
+        if (pat && pat !== '(unknown)' && !S.rules.some(r => r.user && r.pattern.toLowerCase() === pat && r.category === PAYOFF_CAT)) { S.rules.unshift({ id: uid(), pattern: pat, category: PAYOFF_CAT, user: true }); invalidateRules(); }
+      } else obj.payCard = '';
       const c = $('#eCat').value;
       if (c === '__auto') { obj.catManual = false; invalidateRules(); obj.category = categorize(obj); }
-      else { if (isNew || c !== d.category) obj.catManual = true; obj.category = c; }
+      else { if (isNew || c !== d.category) { obj.catManual = true; obj.catSource = 'manual'; } obj.category = c; }
       obj.key = dedupeKey(obj);
       if (isNew) S.txns.push(obj);
       save(); renderAll(); toast(isNew ? 'Transaction added' : 'Transaction saved');
     } }
   ]);
+  const syncCard = () => { $('#eCardF').style.display = $('#eCat').value === PAYOFF_CAT ? '' : 'none'; $('#eCardName').style.display = $('#eCard').value === '__new' ? '' : 'none'; };
+  $('#eCat').addEventListener('change', syncCard); $('#eCard').addEventListener('change', syncCard);
 }
 
 // ---- Review uncategorized: group 'Other' by cleaned merchant; one pick categorizes the group + saves a rule
@@ -1559,11 +1859,13 @@ function renderReview() {
     <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="revInc"${ui.reviewIncome ? ' checked' : ''}> Also show unrecognised money-in (auto-filed as Income)</label></div>
   <div class="card">
     <p class="hint" style="margin-top:0">${S.txns.length ? `<b>${nOther}</b> of ${S.txns.length} transactions (${(nOther / S.txns.length * 100).toFixed(1)}%) are in "Other". ` : ''}Grouped by cleaned merchant name, most frequent first. Choosing a category files <b>every</b> transaction in the group and saves a rule, so future imports are categorized automatically.</p>
+    <p class="hint">🔎 <b>Search</b> opens a normal DuckDuckGo search in a new tab, only when you tap it, and sends just the cleaned merchant name plus "Sverige" — no amounts, dates or other data. Nothing else in this app goes online.</p>
     ${groups.length ? groups.map((gr, i) => `<div class="review-row" data-g="${i}">
       <div style="min-width:0"><div style="font-weight:650">${esc(gr.name)}</div>
         <div class="stats">${gr.txns.length}× · ${fmt(gr.total)} · ${esc(fmtDate(gr.from))}${gr.from !== gr.to ? ' – ' + esc(fmtDate(gr.to)) : ''}${gr.txns[0].category !== 'Other' ? ` · now ${esc(gr.txns[0].category)}` : ''}</div>
         <div class="raw" title="${esc([...gr.raws].join('\n'))}">Bank text: ${esc([...gr.raws].slice(0, 3).join(' · '))}${gr.raws.size > 3 ? ` (+${gr.raws.size - 3} more)` : ''}</div></div>
-      <select data-revcat aria-label="Category for ${esc(gr.name)}"><option value="">Choose category…</option>${S.categories.filter(c => c.name !== 'Other').map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select>
+      <div class="review-actions"><a class="btn small" href="https://duckduckgo.com/?q=${encodeURIComponent(gr.name + ' Sverige')}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" title="Opens a web search for just &quot;${esc(gr.name)} Sverige&quot; in a new tab">🔎 Search</a>
+      <select data-revcat aria-label="Category for ${esc(gr.name)}"><option value="">Choose category…</option>${catOptions('', false, ['Other'])}</select></div>
     </div>`).join('') : `<div class="empty">${pool.length || nOther ? '' : 'Nothing to review. Every transaction has a category 🎉'}</div>`}
   </div>`;
   $('#revInc').onchange = e => { ui.reviewIncome = e.target.checked; renderReview(); };
@@ -1578,6 +1880,7 @@ function renderReview() {
     let extra = 0; S.txns.forEach(t => { if (t.category === 'Other' && !t.catManual && categorize(t) === cat) { t.category = cat; extra++; } });
     save(); renderAll();
     toast(`${gr.txns.length + extra} transaction${gr.txns.length + extra === 1 ? '' : 's'} → ${cat} · rule "${rulePattern}" saved`);
+    if (cat === PAYOFF_CAT) chooseCard(gr.txns, () => {});
   });
 }
 
@@ -1586,24 +1889,31 @@ function renderBudgets() {
   const months = allMonths();
   const m = ui.month && ui.month !== 'all' ? ui.month : (months[months.length - 1] || periodOf(todayStr()));
   const sum = summarize(m);
-  const cats = S.categories.filter(c => c.type === 'expense');
-  const totalBudget = cats.reduce((a, c) => a + (+S.budgets[c.name] || 0), 0);
-  const totalSpent = cats.reduce((a, c) => a + (+S.budgets[c.name] > 0 ? (sum.byCat[c.name] || 0) : 0), 0);
+  const mains = mainCats().filter(c => c.type === 'expense');
+  const spentIn = (sm, n) => (isMain(n) ? sm.byMain[n] : sm.byCat[n]) || 0;
+  // total: main budgets, plus sub budgets whose main has no budget of its own (avoids double counting)
+  const counted = S.categories.filter(c => c.type === 'expense' && +S.budgets[c.name] > 0 && (!c.parent || !(+S.budgets[c.parent] > 0)));
+  const totalBudget = counted.reduce((a, c) => a + +S.budgets[c.name], 0);
+  const totalSpent = counted.reduce((a, c) => a + spentIn(sum, c.name), 0);
   const last3 = months.filter(x => x <= m).slice(-3);
-  const avg = {}; last3.forEach(x => Object.entries(summarize(x).byCat).forEach(([k, v]) => avg[k] = (avg[k] || 0) + v / last3.length));
+  const avg = {}; last3.forEach(x => { const sm = summarize(x); S.categories.forEach(c => { const v = spentIn(sm, c.name); if (v) avg[c.name] = (avg[c.name] || 0) + v / last3.length; }); });
+  const row = (c, sub) => {
+    const b = +S.budgets[c.name] || 0, sp = spentIn(sum, c.name);
+    return `<div class="budget-row${sub ? ' sub' : ''}"><div><span class="pill"><span class="sw" style="background:${c.color}"></span>${esc(c.name)}</span>${avg[c.name] ? `<div class="hint" style="margin-top:3px">avg ${fmt(avg[c.name])}</div>` : ''}</div>
+        <input type="number" min="0" step="1" inputmode="decimal" placeholder="No budget" data-budget="${esc(c.name)}" value="${b || ''}" aria-label="Budget for ${esc(catLabel(c.name))}">
+        <div class="bp">${b > 0 ? budgetBarHTML('', sp, b) : `<span class="hint">Spent ${fmt(sp)}</span>`}</div></div>`;
+  };
   el.innerHTML = `
   <div class="toolbar"><h2>Budgets</h2>${months.length ? monthSelectHTML('bMonth', m, false) : ''}</div>
   <div class="card">
-    <p class="hint" style="margin-top:0">Optional budget per category for each ${S.settings.periodMode === 'calendar' ? 'calendar month' : 'salary period (salary to salary)'} (leave empty for none). Progress shows spending in <b>${esc(monthLabel(m, true))}</b>${daysLeftText(m) ? ' (' + daysLeftText(m) + ')' : ''}; "avg" is the average of the last ${last3.length || 3} ${S.settings.periodMode === 'calendar' ? 'month' : 'period'}(s).</p>
+    <p class="hint" style="margin-top:0">Optional budget per main category or subcategory for each ${S.settings.periodMode === 'calendar' ? 'calendar month' : 'salary period (salary to salary)'} (leave empty for none). Progress shows spending in <b>${esc(monthLabel(m, true))}</b>${daysLeftText(m) ? ' (' + daysLeftText(m) + ')' : ''}; "avg" is the average of the last ${last3.length || 3} ${S.settings.periodMode === 'calendar' ? 'month' : 'period'}(s).</p>
     ${totalBudget > 0 ? `<div style="margin-bottom:10px">${budgetBarHTML('All budgeted categories', totalSpent, totalBudget)}</div>` : ''}
-    ${cats.map(c => {
-      const b = +S.budgets[c.name] || 0, sp = sum.byCat[c.name] || 0;
-      return `<div class="budget-row"><div><span class="pill"><span class="sw" style="background:${c.color}"></span>${esc(c.name)}</span>${avg[c.name] ? `<div class="hint" style="margin-top:3px">avg ${fmt(avg[c.name])}/mo</div>` : ''}</div>
-        <input type="number" min="0" step="1" inputmode="decimal" placeholder="No budget" data-budget="${esc(c.name)}" value="${b || ''}" aria-label="Budget for ${esc(c.name)}">
-        <div class="bp">${b > 0 ? budgetBarHTML('', sp, b) : `<span class="hint">Spent ${fmt(sp)}</span>`}</div></div>`;
+    ${mains.map(c => { const subs = subsOf(c.name); const open = subs.some(x => +S.budgets[x.name] > 0) || ui.openBudget === c.name;
+      return row(c, false) + (subs.length ? `<details class="budget-subs" data-main="${esc(c.name)}"${open ? ' open' : ''}><summary>${subs.length} subcategories${subs.some(x => +S.budgets[x.name] > 0) ? ' · ' + subs.filter(x => +S.budgets[x.name] > 0).length + ' budgeted' : ''}</summary>${subs.map(x => row(x, true)).join('')}</details>` : '');
     }).join('')}
   </div>`;
   if ($('#bMonth')) $('#bMonth').onchange = e => { ui.month = e.target.value; renderBudgets(); };
+  $$('details.budget-subs').forEach(d => d.addEventListener('toggle', () => { if (d.open) ui.openBudget = d.dataset.main; }));
   $$('[data-budget]').forEach(inp => inp.onchange = () => {
     const v = parseFloat(inp.value); if (isFinite(v) && v > 0) S.budgets[inp.dataset.budget] = round2(v); else delete S.budgets[inp.dataset.budget];
     save(); renderBudgets();
@@ -1637,6 +1947,17 @@ function renderSettings() {
       <p class="hint">Each period starts the day a salary arrives and ends the day before the next one, labelled by the month the salary came in. Before the first salary, after the latest one, or in a month with no salary, the expected payday is used (moved to the Friday before when it falls on a weekend). Mark or unmark a single transaction as salary via its Edit button.</p>
       ${st.periodMode !== 'calendar' ? `<p class="hint" id="salList"><b>Salaries found:</b> ${getPeriods().salaries.length ? getPeriods().salaries.map(d => esc(fmtDate(d))).join(', ') : 'none, so periods use the expected payday'}</p>` : ''}
     </div>
+    <div class="card" id="accCard"><h3>Accounts &amp; credit cards <button class="btn small" id="addCard">＋ Add card</button></h3>
+      <p class="hint" style="margin-top:0">Every import is tagged with an account. A payment from your bank account that pays off a card (Transfers › Credit card payment) is a transfer: the purchases are on the card's own statement, counted on the dates you made them. Add each card with the text its payoff has on your bank statement.</p>
+      <div id="accList">${S.accounts.map((a, i) => `<div class="acc-row" data-ai="${i}">
+        <input type="text" value="${esc(a.name)}" data-aname aria-label="Account name">
+        <select data-atype aria-label="Account type"><option value="bank"${a.type === 'bank' ? ' selected' : ''}>Bank account</option><option value="card"${a.type === 'card' ? ' selected' : ''}>Credit card</option></select>
+        ${a.type === 'card' ? `<input type="text" value="${esc(a.match)}" data-amatch placeholder="Payoff text, e.g. ${esc(a.name.toLowerCase())}" aria-label="Payoff text on bank statement" title="Keyword(s) or /regex/ that the payoff has on your bank statement (comma-separated). Empty = the card name.">
+        <label class="hint acc-chk"><input type="checkbox" data-acount${a.countPayoffs ? ' checked' : ''}> Count payoffs as spending until this card's statement is imported</label>` : ''}
+        <span class="hint">${S.txns.filter(t => t.account === a.id).length} txns</span>
+        <button class="btn small danger" data-adel title="Remove account" aria-label="Remove account">✕</button></div>`).join('') || '<p class="hint">No accounts yet. They are created when you import a file.</p>'}</div>
+      <label class="hint acc-chk"><input type="checkbox" id="sUnlinked"${S.settings.countUnlinkedPayoffs ? ' checked' : ''}> Count card payoffs that aren't linked to any card as spending</label>
+    </div>
     <div class="card"><h3>Data &amp; backup</h3>
       <p class="hint" style="margin-top:0">${S.txns.length} transactions · ${S.categories.length} categories · ${S.rules.length} rules. Stored only on this device, in this browser (localStorage).</p>
       ${backupNoteHTML()}
@@ -1649,13 +1970,15 @@ function renderSettings() {
       </div>
     </div>
     <div class="card"><h3>Categories <button class="btn small" id="addCat">＋ Add category</button></h3>
-      <div id="catList">${S.categories.map((c, i) => `<div class="cat-row" data-i="${i}">
+      <div id="catList">${mainCats().flatMap(m => [m].concat(subsOf(m.name))).map(c => [c, S.categories.indexOf(c)]).map(([c, i]) => `<div class="cat-row${c.parent ? ' sub' : ''}" data-i="${i}">
         <input type="color" value="${esc(c.color)}" data-color title="Color" aria-label="Color">
         <input type="text" value="${esc(c.name)}" data-name aria-label="Category name" ${c.name === 'Other' ? 'disabled title="The fallback category can\'t be renamed"' : ''}>
-        <select data-type title="How this category counts" aria-label="Type"><option value="expense"${c.type === 'expense' ? ' selected' : ''}>Expense</option><option value="income"${c.type === 'income' ? ' selected' : ''}>Income</option><option value="transfer"${c.type === 'transfer' ? ' selected' : ''}>Transfer (ignored)</option></select>
+        <select data-parent title="Main category" aria-label="Main category" ${c.name === 'Other' || subsOf(c.name).length ? 'disabled' : ''}><option value="">Main category</option>${mainCats().filter(m => m.name !== c.name && m.name !== 'Other').map(m => `<option value="${esc(m.name)}"${m.name === c.parent ? ' selected' : ''}>under ${esc(m.name)}</option>`).join('')}</select>
+        <select data-type title="${c.parent ? 'Inherited from the main category' : 'How this category counts'}" aria-label="Type" ${c.parent ? 'disabled' : ''}><option value="expense"${c.type === 'expense' ? ' selected' : ''}>Expense</option><option value="income"${c.type === 'income' ? ' selected' : ''}>Income</option><option value="transfer"${c.type === 'transfer' ? ' selected' : ''}>Transfer (ignored)</option></select>
         <span class="hint" style="width:40px;text-align:right" title="Transactions">${usage[c.name] || 0}</span>
+        ${c.parent || c.name === 'Other' ? '' : `<button class="btn small" data-addsub title="Add a subcategory under ${esc(c.name)}" aria-label="Add subcategory">＋ Sub</button>`}
         <button class="btn small danger" data-delcat ${c.name === 'Other' ? 'disabled' : ''} title="Delete" aria-label="Delete">✕</button></div>`).join('')}</div>
-      <p class="hint">Rename by editing the name. "Transfer" categories (card payments, moving money to savings) are left out of spending and income totals.</p>
+      <p class="hint">Main categories and their subcategories. Rename by editing the name; "＋ Sub" adds a subcategory; move one with its "under …" menu. Subcategories count the same way as their main category. "Transfer" categories (card payoffs, own accounts, savings) are left out of spending and income totals.</p>
     </div>
     <div class="card"><h3>Categorization rules <button class="btn small" id="addRule">＋ Add rule</button></h3>
       <p class="hint" style="margin-top:0">First match wins, top to bottom. A pattern is a word or phrase found in the description (case-insensitive, whole words) or a <code>/regular expression/</code>. Your own rules go at the top.</p>
@@ -1676,6 +1999,23 @@ function renderSettings() {
   $('#sPayday').onchange = e => { const v = Math.round(+e.target.value); if (v >= 1 && v <= 31) st.payday = v; periodChanged(); };
   $('#sSalPat').onchange = e => { st.salaryPattern = e.target.value.trim(); periodChanged(); };
   $('#sSalPick').onchange = e => { if (e.target.value) { st.salaryPattern = e.target.value; periodChanged(); } };
+  $('#addCard').onclick = () => { let n = 'Credit card', k = 2; while (S.accounts.some(a => a.name === n)) n = 'Credit card ' + k++; S.accounts.push({ id: uid(), name: n, type: 'card', match: '', countPayoffs: true }); save(); renderSettings(); const i = $$('#accList [data-aname]').pop(); if (i) { i.focus(); i.select(); } };
+  $('#sUnlinked').onchange = e => { S.settings.countUnlinkedPayoffs = e.target.checked; save(); };
+  $('#accList').onchange = e => {
+    const row = e.target.closest('.acc-row'); if (!row) return; const a = S.accounts[+row.dataset.ai];
+    if (e.target.matches('[data-aname]')) { const v = e.target.value.trim(); if (v) a.name = v; }
+    if (e.target.matches('[data-atype]')) a.type = e.target.value;
+    if (e.target.matches('[data-amatch]')) { const v = e.target.value.trim(); if (v && v.split(',').some(x => x.trim() && !compilePattern(x.trim()))) { toast('Invalid pattern', true); e.target.value = a.match; return; } a.match = v; }
+    if (e.target.matches('[data-acount]')) a.countPayoffs = e.target.checked;
+    save(); renderSettings();
+  };
+  $('#accList').onclick = e => {
+    if (!e.target.closest('[data-adel]')) return; const a = S.accounts[+e.target.closest('.acc-row').dataset.ai];
+    if (!confirm(`Remove account "${a.name}"? Its transactions are kept (without an account).`)) return;
+    S.accounts = S.accounts.filter(x => x !== a); S.txns.forEach(t => { if (t.account === a.id) t.account = ''; if (t.payCard === a.id) t.payCard = ''; });
+    Object.keys(S.layouts).forEach(k => { if (S.layouts[k] === a.id) delete S.layouts[k]; }); if (ui.acc === a.id) ui.acc = ''; if (ui.fAcc === a.id) ui.fAcc = '';
+    save(); renderSettings();
+  };
   $('#bExpJson').onclick = exportJSON;
   $('#bImpJson').onclick = () => $('#jsonInput').click();
   $('#bExpCsv').onclick = () => exportCSV(S.txns.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -1693,7 +2033,12 @@ function renderSettings() {
   $('#catList').onchange = e => {
     const row = e.target.closest('.cat-row'); if (!row) return; const c = S.categories[+row.dataset.i];
     if (e.target.matches('[data-color]')) c.color = e.target.value;
-    if (e.target.matches('[data-type]')) c.type = e.target.value;
+    if (e.target.matches('[data-type]')) { c.type = e.target.value; subsOf(c.name).forEach(x => x.type = c.type); }
+    if (e.target.matches('[data-parent]')) {
+      const np = e.target.value; if (np) { c.parent = np; c.type = catByName(np).type; } else delete c.parent;
+      const [moved] = S.categories.splice(S.categories.indexOf(c), 1); const at = np ? S.categories.indexOf(catByName(np)) + 1 + subsOf(np).length : S.categories.findIndex(x => x.name === 'Other');
+      S.categories.splice(at < 0 ? S.categories.length : at, 0, moved);
+    }
     if (e.target.matches('[data-name]')) {
       const nn = e.target.value.trim();
       if (!nn || (nn !== c.name && catByName(nn))) { toast(nn ? 'A category with that name already exists' : 'Name cannot be empty', true); e.target.value = c.name; return; }
@@ -1702,12 +2047,21 @@ function renderSettings() {
     save(); renderSettings();
   };
   $('#catList').onclick = e => {
+    const add = e.target.closest('[data-addsub]');
+    if (add) {
+      const m = S.categories[+add.closest('.cat-row').dataset.i]; let n = 'New subcategory', k = 2; while (catByName(n)) n = 'New subcategory ' + k++;
+      const at = S.categories.indexOf(m) + 1 + subsOf(m.name).length;
+      S.categories.splice(at, 0, { name: n, color: shadeColor(m.color, subsOf(m.name).length % 4, 4), type: m.type, parent: m.name });
+      save(); renderSettings(); const inp = $$('#catList .cat-row').find(r => +r.dataset.i === at); if (inp) { const i = inp.querySelector('[data-name]'); i.focus(); i.select(); }
+      return;
+    }
     const b = e.target.closest('[data-delcat]'); if (!b) return; const c = S.categories[+b.closest('.cat-row').dataset.i];
-    const n = usage[c.name] || 0;
-    if (!confirm(`Delete category "${c.name}"?` + (n ? `\n${n} transaction(s) will move to "Other".` : '') + '\nRules pointing to it will be removed.')) return;
-    S.categories = S.categories.filter(x => x !== c);
-    S.txns.forEach(t => { if (t.category === c.name) { t.category = 'Other'; t.catManual = false; } });
-    S.rules = S.rules.filter(r => r.category !== c.name); delete S.budgets[c.name];
+    const subs = subsOf(c.name), names = [c.name].concat(subs.map(x => x.name));
+    const n = names.reduce((a, x) => a + (usage[x] || 0), 0), to = c.parent || 'Other';
+    if (!confirm(`Delete category "${c.name}"${subs.length ? ` and its ${subs.length} subcategories` : ''}?` + (n ? `\n${n} transaction(s) will move to "${to}".` : '') + '\nRules pointing to it will be removed.')) return;
+    S.categories = S.categories.filter(x => !names.includes(x.name));
+    S.txns.forEach(t => { if (names.includes(t.category)) { t.category = to; t.catManual = false; } });
+    S.rules = S.rules.filter(r => !names.includes(r.category)); names.forEach(x => delete S.budgets[x]);
     invalidateRules(); save(); renderSettings();
   };
   $('#ruleQ').oninput = e => { ui.ruleQ = e.target.value; clearTimeout(renderSettings._t); renderSettings._t = setTimeout(() => { renderSettings(); const q = $('#ruleQ'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 200); };
@@ -1732,6 +2086,7 @@ function renderSettings() {
 function renameCategory(oldN, newN) {
   const c = catByName(oldN); if (!c) return;
   c.name = newN;
+  S.categories.forEach(x => { if (x.parent === oldN) x.parent = newN; });
   S.txns.forEach(t => { if (t.category === oldN) t.category = newN; });
   S.rules.forEach(r => { if (r.category === oldN) r.category = newN; });
   if (S.budgets[oldN] != null) { S.budgets[newN] = S.budgets[oldN]; delete S.budgets[oldN]; }
@@ -1759,7 +2114,7 @@ $('#jsonInput').addEventListener('change', async e => {
     const data = JSON.parse(await f.text());
     if (!data || !Array.isArray(data.txns)) throw new Error('not a Spending Tracker backup file');
     if (!confirm(`Restore backup "${f.name}" with ${data.txns.length} transactions?\nThis REPLACES all current data.`)) return;
-    S = normalizeState(data); invalidateRules(); save(); ui.month = null; renderAll(); toast('Backup restored');
+    S = normalizeState(data); invalidateRules(); if (S.settings.needsRecat) { delete S.settings.needsRecat; recategorizeAll(); } save(); ui.month = null; renderAll(); toast('Backup restored');
   } catch (err) { toast('Restore failed: ' + err.message, true); }
 });
 
@@ -1787,6 +2142,9 @@ window.addEventListener('storage', e => { if (e.key === LS_KEY) { S = load(); in
 
 S = load();
 // One-time re-categorization after cleaning changes (v2: Klarna "K*" marker). Manual categories are never touched.
+if (S.settings.needsRecat) {   // two-level categories: re-run auto-categorization for non-manual rows so they get subcategories
+  delete S.settings.needsRecat; recategorizeAll(); save();
+}
 if ((S.settings.cleanVersion || 0) < 2) {
   invalidateRules();
   S.txns.forEach(t => { if (!t.catManual && isViaKlarna(t.desc)) t.category = categorize(t); });
@@ -1828,7 +2186,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && docum
 }
 
 // Small console API (handy for power users and automated tests)
-window.SpendingTracker = { get state() { return S; }, cleanDescription, displayName, isViaKlarna, dedupeKey, fuzzyMatchRule, matchRule, parseXlsx, inflateRawJS, excelSerialToISO, isDateFormatCode, parseCSV, detectDelimiter, parseDate, parseAmount, buildConfig, buildTxns, merchantKey, categorize, detectRecurring, summarize, getPeriods, periodOf, paydayDate, monthLabel, isSalary, allMonths, prevMonth, daysLeftText, periodRangeText };
+window.SpendingTracker = { get state() { return S; }, invalidateRules, cleanDescription, displayName, isViaKlarna, dedupeKey, fuzzyMatchRule, matchRule, parseXlsx, inflateRawJS, excelSerialToISO, isDateFormatCode, parseCSV, detectDelimiter, parseDate, parseAmount, buildConfig, buildTxns, merchantKey, categorize, detectRecurring, summarize, dictMatch, dictInfo: DICT_INFO, mainOf, payoffTreatment, payoffMatch, cardFor, normalizeState, getPeriods, periodOf, paydayDate, monthLabel, isSalary, allMonths, prevMonth, daysLeftText, periodRangeText };
 </script>
 </body>
 </html>
