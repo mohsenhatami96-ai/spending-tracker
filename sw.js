@@ -1,5 +1,5 @@
 /* Spending Tracker service worker: caches the app shell for full offline use. Data is never sent anywhere. */
-const VERSION = 'ccc6ed59e5';
+const VERSION = '546d800d87';
 const CACHE = 'spending-tracker-' + VERSION;
 const SHELL = ["./","./index.html","./manifest.webmanifest","./icons/apple-touch-icon.png","./icons/icon-192.png","./icons/icon-512.png","./icons/icon-maskable-192.png","./icons/icon-maskable-512.png","./icons/favicon-32.png"];
 self.addEventListener('install', e => {
