@@ -59,6 +59,27 @@ main{max-width:1240px;margin:0 auto;padding:18px;padding-left:max(18px,env(safe-
 .kpi .value{font-size:24px;font-weight:750;margin-top:4px;font-variant-numeric:tabular-nums}
 .kpi .delta{font-size:12px;color:var(--muted);margin-top:2px}
 .up{color:var(--danger)}.down{color:var(--good)}
+[hidden]{display:none!important}
+.cat-pick{display:inline-flex;align-items:center;justify-content:space-between;gap:6px;max-width:100%;min-width:0;border:1px solid var(--border);background:var(--input);color:var(--text);border-radius:8px;padding:6px 10px;font:inherit;font-size:14px;cursor:pointer;text-align:left}
+.cat-pick:hover{border-color:var(--accent)}.cat-pick:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.cat-pick .cp-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.cat-pick .cp-caret{color:var(--muted);font-size:11px;flex-shrink:0}
+.cat-pick .cp-of,.cp-opt .cp-of{color:var(--muted)}.cat-pick .cp-ph{color:var(--muted)}
+.cat-pick.cat-select{max-width:190px;padding:4px 8px;font-size:13px}.cat-pick.cp-full{width:100%}
+.field .cat-pick{width:100%}.review-actions .cat-pick{flex:1;min-width:180px}
+.cat-pop{position:fixed;z-index:1000;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.22);display:flex;flex-direction:column;overflow:hidden}
+.cp-top{display:flex;gap:6px;padding:8px;border-bottom:1px solid var(--border)}.cp-top input{flex:1;min-width:0}
+.cp-list{overflow-y:auto;overscroll-behavior:contain;padding:4px 0 6px}
+.cp-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:8px 12px 2px}
+.cp-opt{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:14px}
+.cp-opt.cp-sub{padding-left:24px}.cp-opt .cp-note{color:var(--muted);font-weight:400}
+.cp-opt.active{background:var(--accent-2)}.cp-opt.on{font-weight:650;color:var(--accent)}.cp-opt.implied{opacity:.75}
+.cp-check{width:16px;text-align:center;color:var(--accent);font-weight:700}
+.cp-empty{padding:16px 12px;color:var(--muted);font-size:14px}
+.cp-bg{position:fixed;inset:0;background:rgba(10,14,22,.45);z-index:999}
+.cat-pop.cp-sheet{left:8px;right:8px;top:max(8px,env(safe-area-inset-top));width:auto;max-height:min(70vh,calc(var(--vvh,100vh) - 24px));border-radius:16px}
+.cat-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);background:var(--accent-2);color:var(--accent);border-radius:999px;padding:4px 10px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.budget-row.flash{background:var(--accent-2);transition:background .3s}
 .pos{color:var(--good)}
 .neg{color:var(--danger)}
 .tab-short{display:none}
@@ -207,6 +228,7 @@ tbody tr:hover{background:var(--panel-2)}
   nav.tabs button{min-height:44px}
   .legend .row,.hbar,#trend [data-month]{min-height:44px}
   .modal .btn{min-height:44px}
+  .cat-pick,.cat-pick.cat-select,.cp-opt,.chip{min-height:44px}.cp-opt{font-size:16px}.cat-pick{font-size:16px}
   .budget-subs summary,.acc-chk,details.info summary{min-height:44px;display:flex;align-items:center;gap:6px}
   .insight{flex-direction:column}.ins-side{flex-direction:row;align-items:center;width:100%;justify-content:space-between}
   .big-num{font-size:24px}
@@ -1603,7 +1625,7 @@ function trendSVG(months, data, selected) {
 }
 
 /* ---------------- Views ---------------- */
-const ui = { view: 'dashboard', month: null, q: '', fCat: '', fAcc: '', acc: '', drill: '', fMonth: '', fType: '', sortKey: 'date', sortDir: -1, limit: 150, ruleQ: '', reviewIncome: false };
+const ui = { view: 'dashboard', month: null, q: '', fCat: '', fCats: [], catQ: '', fAcc: '', acc: '', drill: '', fMonth: '', fType: '', sortKey: 'date', sortDir: -1, limit: 150, ruleQ: '', reviewIncome: false };
 
 function renderAll() {
   applyTheme();
@@ -1701,8 +1723,176 @@ function renderDashboard() {
   if ($('#accSel')) $('#accSel').onchange = e => { ui.acc = e.target.value; renderDashboard(); };
   $$('#view-dashboard [data-merchant]').forEach(r => r.addEventListener('click', () => gotoTx({ q: r.dataset.merchant })));
 }
-function gotoTx(f) { Object.assign(ui, { q: '', fCat: '', fType: '', fMonth: ui.month === 'all' ? '' : ui.month, limit: 150 }, f); ui.view = 'transactions'; renderAll(); window.scrollTo(0, 0); }
+function gotoTx(f) { Object.assign(ui, { q: '', fCat: '', fCats: [], fType: '', fMonth: ui.month === 'all' ? '' : ui.month, limit: 150 }, f); if (ui.fCat) { ui.fCats = [ui.fCat]; ui.fCat = ''; } ui.view = 'transactions'; renderAll(); window.scrollTo(0, 0); }
 
+/* ---------------- Searchable category picker (combobox) ---------------- */
+// Cheap Swedish/English synonyms so e.g. "mat" finds Groceries/Dining and "fris" finds Hair/barber.
+const CAT_SYN = {
+  'Housing': 'bostad boende hem home', 'Mortgage/Rent': 'hyra bolån bolan ränta rent mortgage', 'Housing fee/BRF': 'avgift brf bostadsrätt förening', 'Home insurance': 'hemförsäkring', 'Repairs & furnishing': 'möbler renovering reparation hantverkare furniture',
+  'Utilities': 'räkningar bills', 'Electricity': 'el ström elräkning power', 'Broadband': 'bredband internet wifi fiber', 'Mobile': 'mobil telefon phone', 'Water/heating': 'vatten värme fjärrvärme',
+  'Groceries': 'mat livsmedel matvaror mataffär food', 'Supermarket': 'matbutik livsmedelsbutik ica coop willys hemköp lidl', 'Ethnic/specialty store': 'livs specialbutik', 'Bakery': 'bageri konditori bröd', 'Alcohol/Systembolaget': 'alkohol vin öl systemet',
+  'Dining': 'mat äta ute restaurang food eat', 'Restaurant': 'restaurang lunch middag', 'Fast food': 'snabbmat burger pizza', 'Café': 'kafé fika kaffe coffee', 'Takeaway/delivery': 'hämtmat leverans', 'Bar': 'pub krog drinks',
+  'Transport': 'resor bil car', 'Fuel': 'bensin diesel drivmedel tanka petrol', 'Parking': 'parkering', 'Public transport': 'kollektivtrafik buss tunnelbana pendel bus metro', 'Taxi': 'uber bolt', 'Car service/repair': 'bilverkstad verkstad däck', 'Vehicle tax/insurance': 'fordonsskatt bilförsäkring trafikförsäkring', 'Car loan/leasing': 'billån leasing',
+  'Shopping': 'handla köp shop', 'Clothing': 'kläder skor clothes fashion', 'Electronics': 'elektronik dator', 'Home & garden': 'trädgård inredning', 'Online marketplace': 'nätbutik webbshop online', 'Kids': 'barn leksaker toys', 'Hobbies': 'hobby fritid',
+  'Health': 'hälsa vård sjukvård', 'Pharmacy': 'apotek medicin', 'Doctor/care': 'läkare vårdcentral sjukhus', 'Dental': 'tandläkare tandvård dentist', 'Optician': 'optiker glasögon linser glasses', 'Gym/sports': 'gym träning sport idrott',
+  'Pets': 'husdjur djur hund katt', 'Vet': 'veterinär djursjukhus', 'Pet insurance': 'djurförsäkring', 'Pet supplies': 'djurmat foder',
+  'Subscriptions': 'prenumeration abonnemang', 'Streaming': 'film musik serier', 'Software/apps': 'appar program mjukvara', 'Memberships/unions': 'medlemskap fackförening fack',
+  'Insurance': 'försäkring', 'Finance': 'bank ekonomi', 'Bank fees': 'bankavgift avgifter', 'Loan/credit': 'lån kredit csn amortering', 'Unemployment fund': 'a-kassa akassa',
+  'Entertainment': 'nöje bio konsert evenemang', 'Travel': 'resa semester', 'Flights': 'flyg', 'Hotels': 'hotell', 'Trains': 'tåg sj',
+  'Personal care': 'skönhet hygien', 'Hair/barber': 'frisör frisyr klippning hår barberare', 'Beauty': 'smink kosmetika', 'Education': 'utbildning skola kurs böcker', 'Gifts & donations': 'gåvor presenter present välgörenhet',
+  'Income': 'inkomst', 'Salary': 'lön', 'Refunds': 'återbetalning retur', 'Other income': 'övrig inkomst', 'Transfers': 'överföring', 'Own accounts': 'egna konton', 'Savings': 'sparande spara', 'Credit card payment': 'kreditkort kortfaktura', 'Other': 'övrigt okategoriserad'
+};
+const foldKey = s => foldText(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+// Does a category (or its main) match the typed query? Every word must match the start of a word (or, 4+ letters, anywhere).
+function catSearchHay(name) { return foldKey(name + ' ' + (CAT_SYN[name] || '')); }
+function catQueryMatch(hay, q) {
+  const words = hay.split(/[\s\/&,.()-]+/).filter(Boolean);
+  return foldKey(q).split(/\s+/).filter(Boolean).every(tk => words.some(w => w.startsWith(tk)) || (tk.length >= 4 && hay.includes(tk)));
+}
+function catSearch(q, exclude) {   // [{main, mainHit, items:[names]}] in tree order
+  const ex = new Set(exclude || []), out = [];
+  mainCats().forEach(m => {
+    if (ex.has(m.name)) return;
+    const subs = subsOf(m.name).filter(s => !ex.has(s.name)).map(s => s.name);
+    if (!q.trim()) { out.push({ main: m.name, mainHit: true, items: subs }); return; }
+    const mainHit = catQueryMatch(catSearchHay(m.name), q);
+    const hits = mainHit ? subs : subs.filter(s => catQueryMatch(catSearchHay(s) + ' ' + foldKey(m.name), q));
+    if (mainHit || hits.length) out.push({ main: m.name, mainHit, items: hits });
+  });
+  return out;
+}
+function catPickLabel(v, extra, placeholder) {
+  const ex = (extra || []).find(x => x[0] === v); if (ex) return esc(ex[1]);
+  if (!v) return `<span class="cp-ph">${esc(placeholder || 'Choose category…')}</span>`;
+  const c = catByName(v); if (!c) return esc(v);
+  return c.parent ? `<span class="cp-of">${esc(c.parent)} › </span>${esc(c.name)}` : esc(c.name);
+}
+// A button that behaves like a <select> for existing code: has .value and fires a bubbling "change" event.
+function catPickHTML(o) {
+  return `<button type="button" class="cat-pick${o.cls ? ' ' + o.cls : ''}"${o.id ? ` id="${o.id}"` : ''} value="${esc(o.value || '')}" aria-haspopup="listbox" aria-expanded="false"
+    ${o.extra ? ` data-extra="${esc(JSON.stringify(o.extra))}"` : ''}${o.exclude ? ` data-exclude="${esc(JSON.stringify(o.exclude))}"` : ''}${o.placeholder ? ` data-ph="${esc(o.placeholder)}"` : ''}${o.norecent ? ' data-norecent' : ''} ${o.attrs || ''}><span class="cp-label">${catPickLabel(o.value || '', o.extra, o.placeholder)}</span><span class="cp-caret" aria-hidden="true">▾</span></button>`;
+}
+function pushRecentCat(v) {
+  if (!catByName(v)) return;
+  const r = (S.settings.recentCats || []).filter(x => x !== v); r.unshift(v); S.settings.recentCats = r.slice(0, 6);
+}
+const cp = { btn: null, multi: null, active: -1, opts: [] };
+function closeCatPicker(refocus) {
+  const pop = $('#catPop'); if (!pop) return;
+  pop.remove(); const bg = $('#catPopBg'); if (bg) bg.remove();
+  window.removeEventListener('resize', cpReposition); window.removeEventListener('scroll', cpReposition, true); if (window.visualViewport) window.visualViewport.removeEventListener('resize', cpReposition);
+  const b = cp.btn; cp.btn = null; const m = cp.multi; cp.multi = null;
+  if (b) b.setAttribute('aria-expanded', 'false');
+  if (m && m.onClose) m.onClose();
+  if (refocus) { const f = b && b.isConnected ? b : (m && m.refocusId ? $('#' + m.refocusId) : null); if (f) f.focus(); }
+}
+const cpSheet = () => window.innerWidth <= 700;
+function cpReposition() {
+  const pop = $('#catPop'); if (!pop) return;
+  if (cpSheet()) { if (window.visualViewport) pop.style.setProperty('--vvh', window.visualViewport.height + 'px'); return; }   // stays above the on-screen keyboard
+  if (!cp.btn) return;
+  if (!cp.btn.isConnected) return;
+  const r = cp.btn.getBoundingClientRect(), w = Math.max(r.width, 300), h = Math.min(380, window.innerHeight - 16);
+  const below = window.innerHeight - r.bottom - 8, top = below >= Math.min(h, 260) || below >= r.top ? r.bottom + 4 : Math.max(8, r.top - 4 - Math.min(h, r.top - 12));
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px'; pop.style.top = top + 'px'; pop.style.width = w + 'px';
+  pop.style.maxHeight = (top > r.top ? Math.min(h, window.innerHeight - top - 8) : Math.min(h, r.top - 8)) + 'px';
+}
+// multi: { selected: [names], onToggle(name, list), onClose(), refocusId }
+function openCatPicker(btn, multi, initialText) {
+  closeCatPicker(false);
+  cp.btn = btn; cp.multi = multi || null; cp.active = -1;
+  const extra = btn.dataset.extra ? JSON.parse(btn.dataset.extra) : [], exclude = btn.dataset.exclude ? JSON.parse(btn.dataset.exclude) : [];
+  const sheet = cpSheet();
+  if (sheet) { const bg = document.createElement('div'); bg.id = 'catPopBg'; bg.className = 'cp-bg'; bg.addEventListener('click', () => closeCatPicker(true)); document.body.appendChild(bg); }
+  const pop = document.createElement('div');
+  pop.id = 'catPop'; pop.className = 'cat-pop' + (sheet ? ' cp-sheet' : ''); pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose category');
+  pop.innerHTML = `<div class="cp-top"><input type="search" id="catPopInput" role="combobox" aria-expanded="true" aria-controls="catPopList" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search categories… (e.g. park, mat, frisör)" aria-label="Search categories">
+    ${multi ? '<button type="button" class="btn primary small" id="catPopDone">Done</button>' : sheet ? '<button type="button" class="btn small" id="catPopDone" aria-label="Close">✕</button>' : ''}</div>
+    <div id="catPopList" class="cp-list" role="listbox"${multi ? ' aria-multiselectable="true"' : ''}></div>`;
+  document.body.appendChild(pop);
+  btn.setAttribute('aria-expanded', 'true');
+  const input = $('#catPopInput'), list = $('#catPopList');
+  const render = () => {
+    const q = input.value, groups = catSearch(q, exclude), sel = multi ? new Set(multi.selected) : new Set([btn.value]);
+    const opt = (v, label, cls, implied) => { const on = !!(sel.has(v) || implied); return `<div role="option" class="cp-opt${cls ? ' ' + cls : ''}${on ? ' on' : ''}${implied ? ' implied' : ''}" data-v="${esc(v)}" aria-selected="${on}">${multi ? `<span class="cp-check" aria-hidden="true">${on ? '✓' : ''}</span>` : ''}<span>${label}</span></div>`; };
+    let h = '';
+    const ex = extra.filter(x => !q.trim() || catQueryMatch(foldKey(x[1]), q));
+    if (ex.length) h += `<div role="group">${ex.map(x => opt(x[0], esc(x[1]), 'cp-extra')).join('')}</div>`;
+    const recent = !q.trim() && !multi && !btn.hasAttribute('data-norecent') ? (S.settings.recentCats || []).filter(n => catByName(n) && !exclude.includes(n) && !exclude.includes(mainOf(n))) : [];
+    if (recent.length) h += `<div role="group" aria-label="Recently used"><div class="cp-head">Recently used</div>${recent.map(n => opt(n, catPickLabel(n), 'cp-recent')).join('')}</div>`;
+    h += groups.map(g => {
+      const mainSel = multi && sel.has(g.main), hasSubs = subsOf(g.main).length > 0;
+      const mainLabel = esc(g.main) + (hasSubs ? `<span class="cp-note">${multi ? ' · all' : ' · general'}</span>` : '');
+      return `<div role="group" aria-label="${esc(g.main)}">${hasSubs ? `<div class="cp-head">${esc(g.main)}</div>` : ''}${g.mainHit ? opt(g.main, mainLabel, 'cp-main') : ''}${g.items.map(n => opt(n, esc(n), 'cp-sub', mainSel)).join('')}</div>`;
+    }).join('');
+    list.innerHTML = h || '<div class="cp-empty">No category matches. Try another word.</div>';
+    cp.opts = $$('.cp-opt', list);
+    cp.active = cp.opts.length ? Math.max(0, q.trim() ? 0 : cp.opts.findIndex(o => o.classList.contains('on') && !o.classList.contains('cp-recent'))) : -1;
+    if (cp.active < 0 && cp.opts.length) cp.active = 0;
+    setActive(cp.active, !q.trim());
+  };
+  const setActive = (i, center) => {
+    cp.opts.forEach(o => o.classList.remove('active'));
+    cp.active = i; const o = cp.opts[i];
+    if (!o) { input.removeAttribute('aria-activedescendant'); return; }
+    o.classList.add('active'); o.id = 'cpo-act'; cp.opts.forEach(x => { if (x !== o && x.id === 'cpo-act') x.removeAttribute('id'); });
+    input.setAttribute('aria-activedescendant', 'cpo-act');
+    o.scrollIntoView({ block: center ? 'center' : 'nearest' });
+  };
+  const choose = o => {
+    const v = o.dataset.v;
+    if (multi) { const s = new Set(multi.selected); const m = mainOf(v);
+      if (o.classList.contains('implied')) { s.delete(m); subsOf(m).forEach(x => { if (x.name !== v) s.add(x.name); }); }
+      else if (s.has(v)) s.delete(v); else { s.add(v); if (isMain(v)) subsOf(v).forEach(x => s.delete(x.name)); }
+      multi.selected = Array.from(s); multi.onToggle(v, multi.selected); const keep = input.value; render(); input.value = keep; input.focus(); return; }
+    btn.value = v; $('.cp-label', btn).innerHTML = catPickLabel(v, extra, btn.dataset.ph);
+    if (!btn.hasAttribute('data-norecent')) pushRecentCat(v);
+    closeCatPicker(true);
+    btn.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  list.addEventListener('mousedown', e => e.preventDefault());   // keep focus in the search field
+  list.addEventListener('click', e => { const o = e.target.closest('.cp-opt'); if (o) choose(o); });
+  list.addEventListener('mousemove', e => { const o = e.target.closest('.cp-opt'); if (o && !o.classList.contains('active')) { const i = cp.opts.indexOf(o); cp.opts.forEach(x => x.classList.remove('active')); o.classList.add('active'); cp.active = i; } });
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (cp.opts.length) setActive((cp.active + (e.key === 'ArrowDown' ? 1 : -1) + cp.opts.length) % cp.opts.length); }
+    else if (e.key === 'Home' && e.ctrlKey || e.key === 'PageUp') { e.preventDefault(); setActive(0); }
+    else if (e.key === 'End' && e.ctrlKey || e.key === 'PageDown') { e.preventDefault(); setActive(cp.opts.length - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (cp.opts[cp.active]) choose(cp.opts[cp.active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeCatPicker(true); }
+    else if (e.key === 'Tab') closeCatPicker(false);
+  });
+  if ($('#catPopDone')) $('#catPopDone').onclick = () => closeCatPicker(true);
+  if (initialText) input.value = initialText;
+  render();
+  cpReposition(); window.addEventListener('resize', cpReposition); window.addEventListener('scroll', cpReposition, true); if (window.visualViewport) window.visualViewport.addEventListener('resize', cpReposition);
+  input.focus();
+}
+document.addEventListener('mousedown', e => { const pop = $('#catPop'); if (pop && !pop.contains(e.target) && !(cp.btn && cp.btn.contains(e.target)) && !e.target.closest('#catPopBg')) closeCatPicker(false); }, true);
+document.addEventListener('click', e => {
+  const b = e.target.closest('.cat-pick'); if (!b || b.disabled) return;
+  if (cp.btn === b && $('#catPop')) { closeCatPicker(true); return; }
+  if (b.dataset.multi) { const h = catPickMulti[b.dataset.multi]; if (h) openCatPicker(b, h()); } else openCatPicker(b);
+});
+document.addEventListener('keydown', e => {
+  const b = e.target.closest && e.target.closest('.cat-pick'); if (!b || b.disabled || $('#catPop')) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); b.click(); }
+  else if (e.key.length === 1 && /\S/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); b.dataset.multi ? openCatPicker(b, catPickMulti[b.dataset.multi](), e.key) : openCatPicker(b, null, e.key); const i = $('#catPopInput'); if (i) i.dispatchEvent(new Event('input')); }
+});
+const catPickMulti = {
+  // Activity filter: several categories at once; a main category includes all its subcategories.
+  txf: () => ({ selected: ui.fCats.slice(), refocusId: 'fCatAdd', onToggle: (v, list) => { ui.fCats = list; ui.limit = 150; renderTransactions(); } })
+};
+
+// Hide category rows that don't match (main matches → all its subs shown; a matching sub keeps its main visible). Returns the number of visible rows.
+function filterCatRows(rows, q, kids) {
+  const show = new Set(); catSearch(q || '', []).forEach(g => { show.add(g.main); g.items.forEach(n => show.add(n)); });
+  const on = n => !String(q || '').trim() || show.has(n) || (!catByName(n) && catQueryMatch(catSearchHay(n), q));
+  let vis = 0;
+  rows.forEach(r => { const ok = on(r.dataset.cname); r.hidden = !ok; if (ok) vis++;
+    if (kids) kids(r).filter(k => k !== r).forEach(k => { const v = on(k.dataset.cname); k.hidden = !v; if (v) vis++; }); });
+  return vis;
+}
 function catOptions(sel, includeAll, exclude) {
   return (includeAll ? `<option value="">All categories</option>` : '') + mainCats().filter(m => !(exclude && exclude.includes(m.name))).map(m => {
     const subs = subsOf(m.name), o = (n, l) => `<option value="${esc(n)}"${n === sel ? ' selected' : ''}>${esc(l)}</option>`;
@@ -1710,10 +1900,10 @@ function catOptions(sel, includeAll, exclude) {
   }).join('');
 }
 function filteredTxns() {
-  const q = ui.q.trim().toLowerCase();
-  const list = S.txns.filter(t => inCat(t.category, ui.fCat) && (!ui.fAcc || t.account === ui.fAcc) && (!ui.fMonth || periodOf(t.date) === ui.fMonth) &&
+  const q = foldKey(ui.q.trim());
+  const list = S.txns.filter(t => (!ui.fCats.length || ui.fCats.some(c => inCat(t.category, c))) && (!ui.fAcc || t.account === ui.fAcc) && (!ui.fMonth || periodOf(t.date) === ui.fMonth) &&
     (!ui.fType || (ui.fType === 'in' ? t.amount > 0 : t.amount < 0)) &&
-    (!q || (t.desc + ' ' + cleanDescription(t.desc) + ' ' + t.note + ' ' + t.category + ' ' + merchantKey(t.desc) + ' ' + Math.abs(t.amount).toFixed(2)).toLowerCase().includes(q)));
+    (!q || foldKey(t.desc + ' ' + cleanDescription(t.desc) + ' ' + t.note + ' ' + catLabel(t.category) + ' ' + merchantKey(t.desc) + ' ' + Math.abs(t.amount).toFixed(2)).includes(q)));
   const k = ui.sortKey, d = ui.sortDir;
   return list.sort((a, b) => {
     let r;
@@ -1733,13 +1923,13 @@ function renderTransactions() {
   const list = filteredTxns();
   const out = list.filter(t => t.amount < 0).reduce((a, t) => a + t.amount, 0), inn = list.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0);
   const arrow = k => ui.sortKey === k ? (ui.sortDir > 0 ? ' ▲' : ' ▼') : '';
-  const filtered = ui.q || ui.fCat || ui.fMonth || ui.fType || ui.fAcc;
+  const filtered = ui.q || ui.fCats.length || ui.fMonth || ui.fType || ui.fAcc;
   el.innerHTML = `
   <div class="toolbar"><h2>Transactions</h2><button class="btn" id="addTx">＋ Add</button><button class="btn" id="expCsv" title="Export the listed transactions as CSV">Export CSV</button></div>
   <div class="card">
     <div class="toolbar" style="margin-bottom:6px">
-      <input type="search" id="txSearch" placeholder="Search description, note, amount…" value="${esc(ui.q)}" style="flex:1;min-width:180px" aria-label="Search">
-      <select id="fCat" aria-label="Category">${catOptions(ui.fCat, true)}</select>
+      <input type="search" id="txSearch" placeholder="Search description, category, note, amount…" value="${esc(ui.q)}" style="flex:1;min-width:180px" aria-label="Search">
+      <div class="cat-chips" id="fCats" role="group" aria-label="Category filter">${ui.fCats.map(c => `<button type="button" class="chip" data-chipx="${esc(c)}" aria-label="Remove filter ${esc(catLabel(c))}">${esc(catLabel(c))}${subsOf(c).length ? ' · all' : ''} <span aria-hidden="true">✕</span></button>`).join('')}<button type="button" class="cat-pick" id="fCatAdd" data-multi="txf" data-norecent value="" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by categories"><span class="cp-label">${ui.fCats.length ? '＋ Category' : 'All categories'}</span><span class="cp-caret" aria-hidden="true">▾</span></button></div>
       ${S.accounts.length ? `<select id="fAcc" aria-label="Account"><option value="">All accounts</option>${S.accounts.map(a => `<option value="${esc(a.id)}"${a.id === ui.fAcc ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
       <select id="fMonth" aria-label="Month"><option value="">All periods</option>${allMonths().reverse().map(m => `<option value="${m}"${m === ui.fMonth ? ' selected' : ''}>${esc(monthLabel(m, true))}</option>`).join('')}</select>
       <select id="fType" aria-label="Direction"><option value="">In &amp; out</option><option value="out"${ui.fType === 'out' ? ' selected' : ''}>Money out</option><option value="in"${ui.fType === 'in' ? ' selected' : ''}>Money in</option></select>
@@ -1752,7 +1942,7 @@ function renderTransactions() {
       <tbody>${list.slice(0, ui.limit).map(t => `<tr data-id="${t.id}">
         <td class="c-date">${esc(fmtDate(t.date))}</td>
         <td class="c-desc tx-desc" title="Bank text: ${esc(t.desc)}">${esc(displayName(t.desc))}${isViaKlarna(t.desc) ? ' <span class="pill" style="font-size:11px;padding:0 6px;font-weight:500" title="Paid via Klarna">via Klarna</span>' : ''}${isSalary(t) ? ` <span class="pill salary-pill" style="font-size:11px;padding:0 6px;font-weight:500" title="${t.salary === true ? 'Marked as salary by you' : 'Detected as salary'}: a new period starts on this date">salary${t.salary === true ? ' ✓' : ''}</span>` : ''}${cleanDescription(t.desc) !== t.desc.replace(/\s+/g, ' ').trim() ? `<span class="tx-raw">${esc(t.desc)}</span>` : ''}${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}${S.accounts.length > 1 && t.account ? `<span class="tx-raw">${esc(accName(t.account))}</span>` : ''}${payoffInfoHTML(t)}</td>
-        <td class="c-cat"><select class="cat-select" data-catsel aria-label="Category">${catOptions(t.category)}</select>${t.catSource === 'dict' && !t.catManual ? `<span class="auto-pill" title="Auto: matched the built-in merchant list (${esc(titleCase(t.dictName))}). Pick another category to correct it; you'll be offered a rule.">auto</span>` : ''}</td>
+        <td class="c-cat">${catPickHTML({ value: t.category, cls: 'cat-select', attrs: 'data-catsel aria-label="Category"' })}${t.catSource === 'dict' && !t.catManual ? `<span class="auto-pill" title="Auto: matched the built-in merchant list (${esc(titleCase(t.dictName))}). Pick another category to correct it; you'll be offered a rule.">auto</span>` : ''}</td>
         <td class="c-amt num ${t.amount > 0 ? 'pos' : ''}">${fmt(t.amount)}</td>
         <td class="c-act row-actions"><button class="btn small" data-edit>Edit</button> <button class="btn small danger" data-del title="Delete" aria-label="Delete">✕</button></td></tr>`).join('')}
       </tbody></table></div>
@@ -1761,11 +1951,11 @@ function renderTransactions() {
   </div>`;
   const s = $('#txSearch');
   s.oninput = () => { ui.q = s.value; ui.limit = 150; clearTimeout(renderTransactions._t); renderTransactions._t = setTimeout(() => { renderTransactions(); const n = $('#txSearch'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 200); };
-  $('#fCat').onchange = e => { ui.fCat = e.target.value; renderTransactions(); };
+  $$('#fCats [data-chipx]').forEach(b => b.onclick = () => { ui.fCats = ui.fCats.filter(x => x !== b.dataset.chipx); ui.limit = 150; renderTransactions(); const n = $('#fCatAdd'); if (n) n.focus(); });
   if ($('#fAcc')) $('#fAcc').onchange = e => { ui.fAcc = e.target.value; renderTransactions(); };
   $('#fMonth').onchange = e => { ui.fMonth = e.target.value; renderTransactions(); };
   $('#fType').onchange = e => { ui.fType = e.target.value; renderTransactions(); };
-  if ($('#clrF')) $('#clrF').onclick = () => { ui.q = ui.fCat = ui.fMonth = ui.fType = ui.fAcc = ''; renderTransactions(); };
+  if ($('#clrF')) $('#clrF').onclick = () => { ui.q = ui.fCat = ui.fMonth = ui.fType = ui.fAcc = ''; ui.fCats = []; renderTransactions(); };
   if ($('#more')) $('#more').onclick = () => { ui.limit += 300; renderTransactions(); };
   $('#addTx').onclick = () => editTxn(null);
   $('#expCsv').onclick = () => exportCSV(list);
@@ -1843,7 +2033,7 @@ function editTxn(t) {
       <div class="field"><label for="eType">Type</label><select id="eType"><option value="out"${d.amount <= 0 ? ' selected' : ''}>Expense (money out)</option><option value="in"${d.amount > 0 ? ' selected' : ''}>Income / refund (money in)</option></select></div>
       <div class="field" style="grid-column:1/-1"><label for="eDesc">Description (original bank text)</label><input type="text" id="eDesc" value="${esc(d.desc)}" placeholder="e.g. Coffee shop">${isNew ? '' : `<span class="hint">Shown as: <b>${esc(displayName(d.desc))}</b></span>`}</div>
       <div class="field"><label for="eAmt">Amount</label><input type="number" step="0.01" min="0" id="eAmt" inputmode="decimal" value="${d.amount ? Math.abs(d.amount) : ''}" placeholder="0.00"></div>
-      <div class="field"><label for="eCat">Category</label><select id="eCat"><option value="__auto"${isNew ? ' selected' : ''}>Auto (from rules)</option>${catOptions(isNew ? '' : d.category)}</select></div>
+      <div class="field"><label for="eCat">Category</label>${catPickHTML({ id: 'eCat', value: isNew ? '__auto' : d.category, extra: [['__auto', 'Auto (from rules)']] })}</div>
       ${S.accounts.length ? `<div class="field"><label for="eAcc">Account</label><select id="eAcc"><option value="">—</option>${S.accounts.map(a => `<option value="${esc(a.id)}"${a.id === d.account ? ' selected' : ''}>${esc(a.name)}${a.type === 'card' ? ' (card)' : ''}</option>`).join('')}</select></div>` : ''}
       <div class="field" id="eCardF"${d.category === PAYOFF_CAT ? '' : ' style="display:none"'}><label for="eCard">Pays off card</label><select id="eCard"><option value="">Auto (by payoff text)</option>${cardAccounts().map(a => `<option value="${esc(a.id)}"${a.id === d.payCard ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ New card…</option></select><input type="text" id="eCardName" placeholder="New card name" style="display:none;margin-top:6px"></div>
       <div class="field"><label for="eSal">Salary (starts a new period)</label><select id="eSal"><option value="auto"${d.salary === undefined ? ' selected' : ''}>Auto${isNew ? '' : ' (' + (isSalary(Object.assign({}, d, { salary: undefined })) ? 'detected: yes' : 'detected: no') + ')'}</option><option value="yes"${d.salary === true ? ' selected' : ''}>Yes, this is salary</option><option value="no"${d.salary === false ? ' selected' : ''}>No, not salary</option></select></div>
@@ -1907,7 +2097,7 @@ function renderReview() {
         <div class="stats">${gr.txns.length}× · ${fmt(gr.total)} · ${esc(fmtDate(gr.from))}${gr.from !== gr.to ? ' – ' + esc(fmtDate(gr.to)) : ''}${gr.txns[0].category !== 'Other' ? ` · now ${esc(gr.txns[0].category)}` : ''}</div>
         <div class="raw" title="${esc([...gr.raws].join('\n'))}">Bank text: ${esc([...gr.raws].slice(0, 3).join(' · '))}${gr.raws.size > 3 ? ` (+${gr.raws.size - 3} more)` : ''}</div></div>
       <div class="review-actions"><a class="btn small" href="https://duckduckgo.com/?q=${encodeURIComponent(gr.name + ' Sverige')}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" title="Opens a web search for just &quot;${esc(gr.name)} Sverige&quot; in a new tab">🔎 Search</a>
-      <select data-revcat aria-label="Category for ${esc(gr.name)}"><option value="">Choose category…</option>${catOptions('', false, ['Other'])}</select></div>
+      ${catPickHTML({ value: '', placeholder: 'Choose category…', exclude: ['Other'], attrs: `data-revcat aria-label="Category for ${esc(gr.name)}"` })}</div>
     </div>`).join('') : `<div class="empty">${pool.length || nOther ? '' : 'Nothing to review. Every transaction has a category 🎉'}</div>`}
   </div>`;
   $('#revInc').onchange = e => { ui.reviewIncome = e.target.checked; renderReview(); };
@@ -1946,7 +2136,7 @@ function renderBudgets() {
         <div class="bp">${b > 0 ? budgetBarHTML('', sp, b) : `<span class="hint">Spent ${fmt(sp)}</span>`}</div></div>`;
   };
   el.innerHTML = `
-  <div class="toolbar"><h2>Budgets</h2>${months.length ? monthSelectHTML('bMonth', m, false) : ''}</div>
+  <div class="toolbar"><h2>Budgets</h2>${catPickHTML({ id: 'bFind', placeholder: 'Find category…', norecent: true, exclude: mainCats().filter(c => c.type !== 'expense').map(c => c.name), attrs: 'aria-label="Find a category to budget"' })}${months.length ? monthSelectHTML('bMonth', m, false) : ''}</div>
   <div class="card">
     <p class="hint" style="margin-top:0">Optional budget per main category or subcategory for each ${S.settings.periodMode === 'calendar' ? 'calendar month' : 'salary period (salary to salary)'} (leave empty for none). Progress shows spending in <b>${esc(monthLabel(m, true))}</b>${daysLeftText(m) ? ' (' + daysLeftText(m) + ')' : ''}; "avg" is the average of the last ${last3.length || 3} ${S.settings.periodMode === 'calendar' ? 'month' : 'period'}(s).</p>
     ${totalBudget > 0 ? `<div style="margin-bottom:10px">${budgetBarHTML('All budgeted categories', totalSpent, totalBudget)}</div>` : ''}
@@ -1956,6 +2146,12 @@ function renderBudgets() {
   </div>`;
   if ($('#bMonth')) $('#bMonth').onchange = e => { ui.month = e.target.value; renderBudgets(); };
   $$('details.budget-subs').forEach(d => d.addEventListener('toggle', () => { if (d.open) ui.openBudget = d.dataset.main; }));
+  $('#bFind').addEventListener('change', e => {
+    const inp = $$('[data-budget]').find(x => x.dataset.budget === e.target.value); if (!inp) return;
+    const d = inp.closest('details'); if (d) { d.open = true; ui.openBudget = d.dataset.main; }
+    const row = inp.closest('.budget-row'); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1600);
+    row.scrollIntoView({ block: 'center' }); inp.focus({ preventScroll: true });
+  });
   $$('[data-budget]').forEach(inp => inp.onchange = () => {
     const v = parseFloat(inp.value); if (isFinite(v) && v > 0) S.budgets[inp.dataset.budget] = round2(v); else delete S.budgets[inp.dataset.budget];
     save(); renderBudgets();
@@ -2319,7 +2515,8 @@ function planSettingsHTML() {
       <div class="field"><label for="pMeth">Essential expenses per period</label><select id="pMeth" data-pset="essentialMethod"><option value="lowq"${s.essentialMethod === 'lowq' ? ' selected' : ''}>Low, typical period (lower quartile)</option><option value="median"${s.essentialMethod === 'median' ? ' selected' : ''}>Median period</option><option value="mean"${s.essentialMethod === 'mean' ? ' selected' : ''}>Average</option></select></div>
     </div>
     <details class="info" id="essDetails"${ui2.essOpen ? ' open' : ''}><summary>Essential categories (used for the buffer): ${fmt(ps.essentialLow)} per period → buffer ${fmt(ps.bufferTarget)}</summary>
-      <div class="ess-list">${mains.map(m => { const subs = subsOf(m.name); return `<div class="ess-main"><label class="acc-chk"><input type="checkbox" data-ess="${esc(m.name)}" data-essmain${s.essential.includes(m.name) ? ' checked' : ''}> <b>${esc(m.name)}</b></label>${subs.length ? `<div class="ess-subs">${subs.map(x => `<label class="acc-chk"><input type="checkbox" data-ess="${esc(x.name)}"${s.essential.includes(x.name) ? ' checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>` : ''}</div>`; }).join('')}</div>
+      <input type="search" id="essQ" placeholder="Search categories (e.g. mat, park)…" aria-label="Search essential categories" style="width:100%;margin-top:8px">
+      <div class="ess-list">${mains.map(m => { const subs = subsOf(m.name); return `<div class="ess-main" data-cname="${esc(m.name)}"><label class="acc-chk"><input type="checkbox" data-ess="${esc(m.name)}" data-essmain${s.essential.includes(m.name) ? ' checked' : ''}> <b>${esc(m.name)}</b></label>${subs.length ? `<div class="ess-subs">${subs.map(x => `<label class="acc-chk" data-cname="${esc(x.name)}"><input type="checkbox" data-ess="${esc(x.name)}"${s.essential.includes(x.name) ? ' checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>` : ''}</div>`; }).join('')}</div>
       <button class="btn small" id="essReset">Default essentials</button></details>
     <p class="hint">Saved on this device and in JSON backups. Returns are assumptions, not guarantees.</p></div>`;
 }
@@ -2331,6 +2528,7 @@ function wirePlanSettings() {
     names.forEach(x => cb.checked ? set.add(x) : set.delete(x)); s.essential = Array.from(set); ui2.essOpen = true; save(); renderSettings();
   });
   $('#essDetails').addEventListener('toggle', e => { ui2.essOpen = e.target.open; });
+  $('#essQ').oninput = e => filterCatRows($$('#planSettings .ess-main'), e.target.value, row => $$('[data-cname]', row));
   $('#essReset').onclick = () => { s.essential = ESSENTIAL_DEFAULT.slice(); ui2.essOpen = true; save(); renderSettings(); };
   $('#planReset').onclick = () => { S.plan.settings = Object.assign({}, PLAN_DEFAULTS, { essential: ESSENTIAL_DEFAULT.slice() }); ui2.calc = null; save(); renderSettings(); };
 }
@@ -2339,7 +2537,7 @@ function renderSettings() {
   const el = $('#view-settings');
   const st = S.settings;
   const rq = (ui.ruleQ || '').toLowerCase();
-  const rules = S.rules.map((r, i) => ({ r, i })).filter(({ r }) => !rq || r.pattern.toLowerCase().includes(rq) || String(r.category).toLowerCase().includes(rq));
+  const rules = S.rules.map((r, i) => ({ r, i })).filter(({ r }) => !rq.trim() || foldKey(r.pattern).includes(foldKey(rq.trim())) || catQueryMatch(catSearchHay(r.category) + ' ' + catSearchHay(mainOf(r.category)), rq));
   const usage = {}; S.txns.forEach(t => usage[t.category] = (usage[t.category] || 0) + 1);
   el.innerHTML = `
   <div class="toolbar"><h2>Settings</h2></div>
@@ -2386,7 +2584,8 @@ function renderSettings() {
       </div>
     </div>
     <div class="card"><h3>Categories <button class="btn small" id="addCat">＋ Add category</button></h3>
-      <div id="catList">${mainCats().flatMap(m => [m].concat(subsOf(m.name))).map(c => [c, S.categories.indexOf(c)]).map(([c, i]) => `<div class="cat-row${c.parent ? ' sub' : ''}" data-i="${i}">
+      <input type="search" id="catQ" placeholder="Search categories (e.g. park, mat, frisör)…" value="${esc(ui.catQ || '')}" style="width:100%;margin-bottom:8px" aria-label="Search categories"><p class="hint" id="catQInfo" hidden></p>
+      <div id="catList">${mainCats().flatMap(m => [m].concat(subsOf(m.name))).map(c => [c, S.categories.indexOf(c)]).map(([c, i]) => `<div class="cat-row${c.parent ? ' sub' : ''}" data-i="${i}" data-cname="${esc(c.name)}">
         <input type="color" value="${esc(c.color)}" data-color title="Color" aria-label="Color">
         <input type="text" value="${esc(c.name)}" data-name aria-label="Category name" ${c.name === 'Other' ? 'disabled title="The fallback category can\'t be renamed"' : ''}>
         <select data-parent title="Main category" aria-label="Main category" ${c.name === 'Other' || subsOf(c.name).length ? 'disabled' : ''}><option value="">Main category</option>${mainCats().filter(m => m.name !== c.name && m.name !== 'Other').map(m => `<option value="${esc(m.name)}"${m.name === c.parent ? ' selected' : ''}>under ${esc(m.name)}</option>`).join('')}</select>
@@ -2398,10 +2597,10 @@ function renderSettings() {
     </div>
     <div class="card"><h3>Categorization rules <button class="btn small" id="addRule">＋ Add rule</button></h3>
       <p class="hint" style="margin-top:0">First match wins, top to bottom. A pattern is a word or phrase found in the description (case-insensitive, whole words) or a <code>/regular expression/</code>. Your own rules go at the top.</p>
-      <input type="search" id="ruleQ" placeholder="Filter rules…" value="${esc(ui.ruleQ || '')}" style="width:100%;margin-bottom:8px" aria-label="Filter rules">
+      <input type="search" id="ruleQ" placeholder="Filter rules by keyword or category (e.g. parkering, mat)…" value="${esc(ui.ruleQ || '')}" style="width:100%;margin-bottom:8px" aria-label="Filter rules">
       <div class="rules-list"><table><tbody>${rules.map(({ r, i }) => `<tr data-ri="${i}">
         <td style="width:52%"><input type="text" value="${esc(r.pattern)}" data-rpat aria-label="Pattern"></td>
-        <td><select data-rcat style="width:100%" aria-label="Category">${catOptions(r.category)}</select></td>
+        <td>${catPickHTML({ value: r.category, cls: 'cp-full', attrs: 'data-rcat aria-label="Category"' })}</td>
         <td style="white-space:nowrap">${r.user ? '<span class="pill" title="Created or edited by you">mine</span> ' : ''}<button class="btn small" data-rup title="Move up" aria-label="Move up">↑</button> <button class="btn small danger" data-rdel title="Delete rule" aria-label="Delete rule">✕</button></td></tr>`).join('') || '<tr><td class="muted">No rules</td></tr>'}</tbody></table></div>
       <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" id="resetRules">Restore default rules</button></div>
     </div>
@@ -2416,6 +2615,8 @@ function renderSettings() {
   $('#sSalPat').onchange = e => { st.salaryPattern = e.target.value.trim(); periodChanged(); };
   $('#sSalPick').onchange = e => { if (e.target.value) { st.salaryPattern = e.target.value; periodChanged(); } };
   wirePlanSettings();
+  const catQ = $('#catQ'); const applyCatQ = () => { const n = filterCatRows($$('#catList .cat-row'), ui.catQ); const info = $('#catQInfo'); info.hidden = !ui.catQ.trim(); info.textContent = n ? `${n} categor${n === 1 ? 'y' : 'ies'} match` : 'No category matches'; };
+  catQ.oninput = () => { ui.catQ = catQ.value; applyCatQ(); }; applyCatQ();
   $('#addCard').onclick = () => { let n = 'Credit card', k = 2; while (S.accounts.some(a => a.name === n)) n = 'Credit card ' + k++; S.accounts.push({ id: uid(), name: n, type: 'card', match: '', countPayoffs: true }); save(); renderSettings(); const i = $$('#accList [data-aname]').pop(); if (i) { i.focus(); i.select(); } };
   $('#sUnlinked').onchange = e => { S.settings.countUnlinkedPayoffs = e.target.checked; save(); };
   $('#accList').onchange = e => {
@@ -2508,6 +2709,8 @@ function renameCategory(oldN, newN) {
   S.rules.forEach(r => { if (r.category === oldN) r.category = newN; });
   if (S.budgets[oldN] != null) { S.budgets[newN] = S.budgets[oldN]; delete S.budgets[oldN]; }
   if (ui.fCat === oldN) ui.fCat = newN;
+  ui.fCats = ui.fCats.map(x => x === oldN ? newN : x);
+  if (S.settings.recentCats) S.settings.recentCats = S.settings.recentCats.map(x => x === oldN ? newN : x);
   invalidateRules();
 }
 
