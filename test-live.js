@@ -1,0 +1,31 @@
+// Checks the published GitHub Pages app: SW registers, manifest valid, works offline.
+import { chromium } from 'playwright-core';
+const BASE = process.env.URL || 'https://mohsenhatami96-ai.github.io/spending-tracker/';
+let fails = 0; const check = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+(async () => {
+  const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  const p = await ctx.newPage(); const errs = [];
+  p.on('console', m => { if (['error', 'warning'].includes(m.type())) errs.push(m.text()); }); p.on('pageerror', e => errs.push(e.message));
+  const res = await p.goto(BASE); check(res.status() === 200, 'GET ' + BASE + ' -> ' + res.status());
+  const sw = await p.evaluate(async () => { const r = await navigator.serviceWorker.ready; return [r.scope, r.active.scriptURL]; });
+  check(sw[0] === BASE && sw[1] === BASE + 'sw.js', 'service worker registered: ' + sw.join(' '));
+  const cdp = await ctx.newCDPSession(p); const am = await cdp.send('Page.getAppManifest');
+  const man = JSON.parse(am.data || '{}');
+  check(am.url === BASE + 'manifest.webmanifest' && !am.errors.length && man.name === 'Spending Tracker' && man.display === 'standalone', 'manifest valid (' + am.url + ')');
+  const inst = await cdp.send('Page.getInstallabilityErrors'); const ie = inst.installabilityErrors.map(e => e.errorId).filter(x => x !== 'in-incognito');
+  check(!ie.length, 'installable per Chrome ' + JSON.stringify(ie));
+  const cached = await p.evaluate(async () => { const k = await caches.keys(); const c = await caches.open(k[0]); return [k, (await c.keys()).length]; });
+  check(cached[0].length === 1 && cached[1] >= 9, 'shell cached ' + JSON.stringify(cached));
+  await p.reload(); check(await p.evaluate(() => !!navigator.serviceWorker.controller), 'controlled by SW');
+  await p.click('#tabs [data-view=transactions]'); await p.click('#addTx'); await p.fill('#eDesc', 'ICA NARA TEST'); await p.fill('#eAmt', '123'); await p.click('#modal .btn.primary');
+  await ctx.setOffline(true);
+  await p.reload(); await p.waitForTimeout(400);
+  const off = await p.evaluate(() => ({ t: document.title, n: window.SpendingTracker.state.txns.length, c: window.SpendingTracker.state.txns[0] && window.SpendingTracker.state.txns[0].category }));
+  check(off.t === 'Spending Tracker' && off.n === 1 && off.c === 'Supermarket', 'offline reload works, data kept on device ' + JSON.stringify(off));
+  const p2 = await ctx.newPage(); await p2.goto(BASE); check(await p2.title() === 'Spending Tracker', 'offline: new tab opens from cache');
+  await p.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+  await p.click('#tabs [data-view=dashboard]'); await p.screenshot({ path: 'screenshots/25-live-offline-iphone.png' });
+  check(!errs.length, 'no console errors ' + JSON.stringify(errs));
+  await b.close(); console.log(fails ? 'LIVE CHECKS FAILED' : 'ALL LIVE CHECKS PASSED'); process.exit(fails ? 1 : 0);
+})().catch(e => { console.error('TEST FAILED', e); process.exit(1); });

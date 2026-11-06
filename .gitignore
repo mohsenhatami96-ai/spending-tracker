@@ -1,0 +1,7 @@
+
+# Personal overlays (never publish)
+.local-private/
+domain/local.personal.js
+
+node_modules/
+package-lock.json
